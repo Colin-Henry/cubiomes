@@ -766,7 +766,99 @@ int mapApproxHeight(float *y, int *ids, const Generator *g, const SurfaceNoise *
     return 0;
 }
 
+int isNaturalWater(const Generator *g, const SurfaceNoise *sn, int x, int y, int z)
+{
+    if (g->dim != DIM_OVERWORLD)
+        return 0;
+    if (g->mc >= MC_1_18 || g->mc <= MC_B1_7)
+        return 0;
+    if (y >= 63 || y < 0)
+        return 0;
 
+    const float biome_kernel[25] = { // with 10 / (sqrt(i**2 + j**2) + 0.2)
+        3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
+        4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
+        4.545454545, 8.333333333, 50.00000000, 8.333333333, 4.545454545,
+        4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
+        3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
+    };
+
+    int px = x >> 2, py = y >> 3, pz = z >> 2;
+    double fx = (x & 3) / 4.0, fy = (y & 7) / 8.0, fz = (z & 3) / 4.0;
+
+    // 4 corners overlap heavily
+    Range r = {4, px-2, pz-2, 6, 6, 0, 1};
+    int *bigCache = allocCache(g, r);
+    genBiomes(g, bigCache, r);
+
+    double dens[2][2][2];
+    int dx, dz;
+    for (dx = 0; dx <= 1; dx++)
+    {
+        for (dz = 0; dz <= 1; dz++)
+        {
+            int cx = px + dx, cz = pz + dz;
+            double d0, s0;
+            double wt = 0, ws = 0, wd = 0;
+            int ii, jj;
+
+            // corner (dx,dz)'s own 5x5 window starts at offset (dx,dz)
+            // within the shared 6x6 cache
+            getBiomeDepthAndScale(bigCache[(2+dz)*r.sx + (2+dx)], &d0, &s0, 0);
+
+            for (jj = 0; jj < 5; jj++)
+            {
+                for (ii = 0; ii < 5; ii++)
+                {
+                    double d, s;
+                    int id = bigCache[(jj+dz)*r.sx + (ii+dx)];
+                    getBiomeDepthAndScale(id, &d, &s, 0);
+                    float weight = biome_kernel[jj*5+ii] / (d + 2);
+                    if (d > d0)
+                        weight *= 0.5;
+                    ws += s * weight;
+                    wd += d * weight;
+                    wt += weight;
+                }
+            }
+            ws /= wt;
+            wd /= wt;
+            ws = ws * 0.9 + 0.1;
+            wd = (wd * 4.0 - 1) / 8;
+            ws = 96 / ws;
+            wd = wd * 17./64;
+
+            double off = sampleOctaveAmp(&sn->octdepth, cx*200, 10, cz*200, 1, 0, 1);
+            off *= 65535./8000;
+            if (off < 0) off = -0.3 * off;
+            off = off * 3 - 2;
+            if (off > 1) off = 1;
+            off *= 17./64;
+            if (off < 0) off *= 1./28;
+            else off *= 1./40;
+
+            int dy;
+            for (dy = 0; dy <= 1; dy++)
+            {
+                int qy = py + dy;
+                double n0 = sampleSurfaceNoise(sn, cx, qy, cz);
+                double fall = 1 - 2 * qy / 32.0 + off - 0.46875;
+                fall = ws * (fall + wd);
+                n0 += (fall > 0 ? 4*fall : fall);
+                dens[dx][dz][dy] = n0;
+            }
+        }
+    }
+    free(bigCache);
+
+    double l00 = lerp(fy, dens[0][0][0], dens[0][0][1]);
+    double l10 = lerp(fy, dens[1][0][0], dens[1][0][1]);
+    double l01 = lerp(fy, dens[0][1][0], dens[0][1][1]);
+    double l11 = lerp(fy, dens[1][1][0], dens[1][1][1]);
+    double lx0 = lerp(fx, l00, l10);
+    double lx1 = lerp(fx, l01, l11);
+    return lerp(fz, lx0, lx1) <= 0;
+}
 
 
 

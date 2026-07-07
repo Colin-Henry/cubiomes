@@ -2300,7 +2300,7 @@ int getCaveCarverConfig(int caveCarverType, int mc, int biome, CaveCarverConfig*
 
     c_underwater_cave_113 = {DIM_OVERWORLD, 1.0F / 15, 1, 4, 15, getCaveThickness, 1.0, providerBiasedToBottom, 0, 127, 8, providerConstantFloat, 0.5F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, -0.7F, -1},
 
-    c_nether_cave_113 = {DIM_NETHER, 0.2F, 0, 4, 10, getNetherCaveThickness, 5.0, providerUniformIntBetween, 0, 127 - 1, -1, providerConstantFloat, 0.5F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, -0.7F, -1}
+    c_nether_cave_113 = {DIM_NETHER, 0.02F, 0, 4, 10, getNetherCaveThickness, 5.0, providerUniformIntBetween, 0, 127 - 1, -1, providerConstantFloat, 0.5F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, -0.7F, -1}
     ;
 
     switch (caveCarverType) {
@@ -2339,7 +2339,7 @@ int isViableCaveBiome(int caveCarverType, int biome) {
     case OCEAN_CAVE_CARVER:
         return isOceanic(biome);
     case UNDERWATER_CAVE_CARVER:
-        return isDeepOcean(biome) || biome == frozen_ocean;
+        return isOceanic(biome);
     default:
         fprintf(stderr, "ERR isViableCaveBiome: unsupported cave carver type %d\n", caveCarverType);
         return 0;
@@ -2646,7 +2646,7 @@ static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z,
     }
     const double floorMinX = floor(x - horizontalRadius) - startChunkX - 1;
     const int minX = MAX(floorMinX, 0);
-    const double floorMaxX = floor(x + horizontalRadius) - startChunkX;
+    const double floorMaxX = floor(x + horizontalRadius) - startChunkX + 1;
     const int maxX = MIN(floorMaxX, 15);
     const double floorMinY = floor(y - verticalRadius) - 1;
     const int minY = MAX(floorMinY, worldMinY + 1);
@@ -2655,7 +2655,7 @@ static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z,
     const int maxY = MIN(floorMaxY, worldMinY + worldHeight - 1 - n);
     const double floorMinZ = floor(z - horizontalRadius) - startChunkZ - 1;
     const int minZ = MAX(floorMinZ, 0);
-    const double floorMaxZ = floor(z + horizontalRadius) - startChunkZ;
+    const double floorMaxZ = floor(z + horizontalRadius) - startChunkZ + 1;
     const int maxZ = MIN(floorMaxZ, 15);
 
     for (int relX = minX; relX <= maxX; relX++) {
@@ -2673,6 +2673,115 @@ static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z,
                 setCarveMask(carvingMask, relX, absY, relZ, worldMinY);
                 appendPos3List(poses, (Pos3) {absX, absY, absZ});
             }
+        }
+    }
+}
+
+void applyAllCarvers(Generator *g, int chunkX, int chunkZ, Pos3List* poses, Pos3List* waterPoses) {
+    int worldHeight;
+    if (g->mc > MC_1_17_1) {
+        worldHeight = g->dim == DIM_OVERWORLD ? 384 : 128;
+    } else {
+        worldHeight = g->dim == DIM_OVERWORLD ? 256 : 128;
+    }
+    int slots = BITNSLOTS(256 * worldHeight);
+    char airCarvingMask[slots];
+    char waterCarvingMask[slots];
+    memset(airCarvingMask, 0, slots);
+    memset(waterCarvingMask, 0, slots);
+
+    // TODO: replace with genBiomes?
+    int biomes[17][17];
+    for (int relChunkX = -8; relChunkX <= 8; ++relChunkX) {
+        for (int relChunkZ = -8; relChunkZ <= 8; ++relChunkZ) {
+            biomes[relChunkZ + 8][relChunkX + 8] = getBiomeAt(g, 4, (chunkX + relChunkX) << 2, 0, (chunkZ + relChunkZ) << 2);
+        }
+    }
+
+    for (int relChunkX = -8; relChunkX <= 8; ++relChunkX) {
+        for (int relChunkZ = -8; relChunkZ <= 8; ++relChunkZ) {
+            int offsetChunkX = chunkX + relChunkX;
+            int offsetChunkZ = chunkZ + relChunkZ;
+            int biome = biomes[relChunkZ + 8][relChunkX + 8];
+
+            for (int canyonCarverType = 0; canyonCarverType < CANYON_CARVER_NUM; ++canyonCarverType) {
+                CanyonCarverConfig ccc;
+                if (!getCanyonCarverConfig(canyonCarverType, g->mc, &ccc)) {
+                    continue;
+                }
+                if (ccc.dim != g->dim) {
+                    continue;
+                }
+                if (!isViableCanyonBiome(canyonCarverType, biome)) {
+                    continue;
+                }
+                uint64_t rnd;
+                if (!checkCanyonStart(g->seed, offsetChunkX, offsetChunkZ, ccc, &rnd)) {
+                    continue;
+                }
+                if (canyonCarverType == UNDERWATER_CANYON_CARVER) carveCanyonInner(ccc, g->mc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, waterCarvingMask, waterPoses);
+                else carveCanyonInner(ccc, g->mc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, airCarvingMask, poses);
+            }
+
+            for (int caveCarverType = 0; caveCarverType < CAVE_CARVER_NUM; ++caveCarverType) {
+                CaveCarverConfig ccc;
+                if (!getCaveCarverConfig(caveCarverType, g->mc, biome, &ccc)) {
+                    continue;
+                }
+                if (ccc.dim != g->dim) {
+                    continue;
+                }
+                if (!isViableCaveBiome(caveCarverType, biome)) {
+                    continue;
+                }
+                uint64_t rnd;
+                if (!checkCaveStart(g->seed, offsetChunkX, offsetChunkZ, ccc, &rnd)) {
+                    continue;
+                }
+                if (caveCarverType == OCEAN_CAVE_CARVER || caveCarverType == UNDERWATER_CAVE_CARVER) carveCaveInner(ccc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, g->mc, waterCarvingMask, waterPoses);
+                else carveCaveInner(ccc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, g->mc, airCarvingMask, poses);
+            }
+        }
+    }
+
+
+    int xDirection[4] = {0, 1, 0, -1}; // N E S W
+    int zDirection[4] = {-1, 0, 1, 0};
+    int chunkStartX = chunkX << 4;
+    int chunkStartZ = chunkZ << 4;
+
+    for (int i = 0; i < waterPoses->size; i++) {
+        int waterX = waterPoses->pos3s[i].x;
+        int waterY = waterPoses->pos3s[i].y;
+        int waterZ = waterPoses->pos3s[i].z;
+
+        if (waterY <= 10)
+            continue;
+
+        int lastX = waterX;
+        int lastZ = waterZ;
+        int placed = 0;
+        for (int direction = 0; direction < 4; direction++) {
+            int nx = waterX + xDirection[direction];
+            int nz = waterZ + zDirection[direction];
+            int nRelX = nx - chunkStartX;
+            int nRelZ = nz - chunkStartZ;
+
+            if (nRelX < 0 || nRelX > 15 || nRelZ < 0 || nRelZ > 15) {
+                waterPoses->pos3s[i] = (Pos3){lastX, waterY, lastZ};
+                placed = 1;
+                break;
+            }
+            lastX = nx;
+            lastZ = nz;
+            if (getCarveMask(airCarvingMask, nRelX, waterY, nRelZ, 0)) {
+                waterPoses->pos3s[i] = (Pos3){nx, waterY, nz};
+                placed = 1;
+                break;
+            }
+        }
+        if (!placed) {
+            waterPoses->pos3s[i] = (Pos3){waterX, waterY, waterZ};
         }
     }
 }
