@@ -764,7 +764,7 @@ void carveCave(uint64_t seed, int mc, int chunkX, int chunkZ, CaveCarverConfig c
  * @param poses Pos3List of all carved air blocks
  * @param waterPoses Pos3List of all carved water blocks
  */
-void applyAllCarvers(Generator *g, int chunkX, int chunkZ, Pos3List* poses, Pos3List* waterPoses);
+void applyAllCarvers(Generator *g, const SurfaceNoise *sn, int chunkX, int chunkZ, Pos3List* poses, Pos3List* waterPoses);
 
 //==============================================================================
 // Random providers

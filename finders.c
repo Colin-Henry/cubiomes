@@ -2316,7 +2316,7 @@ int getCaveCarverConfig(int caveCarverType, int mc, int biome, CaveCarverConfig*
 
     c_cave_extra_underground_118 = {DIM_OVERWORLD, 0.07F, 1, 4, 15, getCaveThickness, 1.0, providerUniformIntBetween, -64 + 8, 47, -1, providerUniformFloatBetween, 0.1F, 0.9F, providerUniformFloatBetween, 0.7F, 1.4F, providerUniformFloatBetween, 0.8F, 1.3F, providerUniformFloatBetween, -1.0F, -0.4F},
 
-    c_ocean_cave_1164 = {DIM_OVERWORLD, 1.0F / 15, 1, 4, 15, getCaveThickness, 1.0, providerBiasedToBottom, 0, 127, 8, providerConstantFloat, 0.5F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, -0.7F, -1},
+    c_ocean_cave_1164 = {DIM_OVERWORLD, 1.0F / 15, 0, 4, 15, getCaveThickness, 1.0, providerBiasedToBottom, 0, 127, 8, providerConstantFloat, 0.5F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, -0.7F, -1},
 
     c_underwater_cave_113 = {DIM_OVERWORLD, 1.0F / 15, 1, 4, 15, getCaveThickness, 1.0, providerBiasedToBottom, 0, 127, 8, providerConstantFloat, 0.5F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, -0.7F, -1},
 
@@ -2411,9 +2411,118 @@ static inline int shouldSkipCaveCarve(double relativeX, double relativeY, double
     return relativeY <= *(double*) minRelativeY ? 1 : relativeX * relativeX + relativeY * relativeY + relativeZ * relativeZ >= 1.0;
 }
 
-static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z, double horizontalRadius, double verticalRadius, int worldMinY, int worldHeight, char carvingMask[], int (*shouldSkip)(double, double, double, int, int, void*), void* arg, Pos3List* poses);
+// context for modelling java WorldCarver.hasWater: air-stage carvers abort a
+// whole sphere when natural water touches the sphere box shell (underwater
+// carvers override hasWater to false, and at the air stage the only liquid
+// that can exist is natural terrain water, so a density check is exact)
+STRUCT(CarveHasWaterCtx) {
+    const Generator *g;
+    const SurfaceNoise *sn;
+    int chunkX, chunkZ;       // target chunk
+    uint64_t colWater[256];   // bit y (0..62) = natural water in this column
+    uint8_t colValid[256];
+};
 
-static void carveCanyonInner(CanyonCarverConfig ccc, int mc, uint64_t *rnd, int sourceChunkX, int sourceChunkZ, int offsetChunkX, int offsetChunkZ, char carvingMask[], Pos3List* poses);
+static void chwComputeColumnDens(const Generator *g, const SurfaceNoise *sn, int x, int z,
+                                 double dens[2][2][20]) {
+    const float biome_kernel[25] = { // with 10 / (sqrt(i**2 + j**2) + 0.2)
+        3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
+        4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
+        4.545454545, 8.333333333, 50.00000000, 8.333333333, 4.545454545,
+        4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
+        3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
+    };
+
+    int px = x >> 2, pz = z >> 2;
+    Range r = {4, px-2, pz-2, 6, 6, 0, 1};
+    int *bigCache = allocCache(g, r);
+    genBiomes(g, bigCache, r);
+
+    for (int dx = 0; dx <= 1; dx++) {
+        for (int dz = 0; dz <= 1; dz++) {
+            int cx = px + dx, cz = pz + dz;
+            double d0, s0;
+            double wt = 0, ws = 0, wd = 0;
+
+            getBiomeDepthAndScale(bigCache[(2+dz)*r.sx + (2+dx)], &d0, &s0, 0);
+
+            for (int jj = 0; jj < 5; jj++) {
+                for (int ii = 0; ii < 5; ii++) {
+                    double d, sc;
+                    int id = bigCache[(jj+dz)*r.sx + (ii+dx)];
+                    getBiomeDepthAndScale(id, &d, &sc, 0);
+                    float weight = biome_kernel[jj*5+ii] / (d + 2);
+                    if (d > d0)
+                        weight *= 0.5;
+                    ws += sc * weight;
+                    wd += d * weight;
+                    wt += weight;
+                }
+            }
+            ws /= wt;
+            wd /= wt;
+            ws = ws * 0.9 + 0.1;
+            wd = (wd * 4.0 - 1) / 8;
+            ws = 96 / ws;
+            wd = wd * 17./64;
+
+            double off = sampleOctaveAmp(&sn->octdepth, cx*200, 10, cz*200, 1, 0, 1);
+            off *= 65535./8000;
+            if (off < 0) off = -0.3 * off;
+            off = off * 3 - 2;
+            if (off > 1) off = 1;
+            off *= 17./64;
+            if (off < 0) off *= 1./28;
+            else off *= 1./40;
+
+            for (int qy = 0; qy < 20; qy++) {
+                double n0 = sampleSurfaceNoise(sn, cx, qy, cz);
+                double fall = 1 - 2 * qy / 32.0 + off - 0.46875;
+                fall = ws * (fall + wd);
+                n0 += (fall > 0 ? 4*fall : fall);
+                dens[dx][dz][qy] = n0;
+            }
+        }
+    }
+    free(bigCache);
+}
+
+static inline double chwLerp(double part, double from, double to) {
+    return from + part * (to - from);
+}
+
+static int chwNaturalWaterAt(CarveHasWaterCtx *hw, int lx, int y, int lz) {
+    if (y < 0 || y > 62)
+        return 0;
+    int li = (lz << 4) | lx;
+    if (!hw->colValid[li]) {
+        int x = (hw->chunkX << 4) + lx;
+        int z = (hw->chunkZ << 4) + lz;
+        double dens[2][2][20];
+        chwComputeColumnDens(hw->g, hw->sn, x, z, dens);
+        uint64_t bits = 0;
+        double fx = (x & 3) / 4.0, fz = (z & 3) / 4.0;
+        for (int wy = 0; wy <= 62; wy++) {
+            int py = wy >> 3;
+            double fy = (wy & 7) / 8.0;
+            double l00 = chwLerp(fy, dens[0][0][py], dens[0][0][py+1]);
+            double l10 = chwLerp(fy, dens[1][0][py], dens[1][0][py+1]);
+            double l01 = chwLerp(fy, dens[0][1][py], dens[0][1][py+1]);
+            double l11 = chwLerp(fy, dens[1][1][py], dens[1][1][py+1]);
+            double lx0 = chwLerp(fx, l00, l10);
+            double lx1 = chwLerp(fx, l01, l11);
+            if (chwLerp(fz, lx0, lx1) <= 0)
+                bits |= 1ULL << wy;
+        }
+        hw->colWater[li] = bits;
+        hw->colValid[li] = 1;
+    }
+    return (hw->colWater[li] >> y) & 1;
+}
+
+static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z, double horizontalRadius, double verticalRadius, int worldMinY, int worldHeight, char carvingMask[], int (*shouldSkip)(double, double, double, int, int, void*), void* arg, Pos3List* poses, CarveHasWaterCtx *hw);
+
+static void carveCanyonInner(CanyonCarverConfig ccc, int mc, uint64_t *rnd, int sourceChunkX, int sourceChunkZ, int offsetChunkX, int offsetChunkZ, char carvingMask[], Pos3List* poses, CarveHasWaterCtx *hw);
 
 void carveCanyon(uint64_t seed, int mc, int chunkX, int chunkZ, CanyonCarverConfig ccc, int canyonCarverType, int biomes[17][17], Pos3List* poses) {
     const int worldHeight = mc > MC_1_17_1 ? 384 : 256;
@@ -2434,7 +2543,7 @@ void carveCanyon(uint64_t seed, int mc, int chunkX, int chunkZ, CanyonCarverConf
                 continue;
             }
 
-            carveCanyonInner(ccc, mc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, carvingMask, poses);
+            carveCanyonInner(ccc, mc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, carvingMask, poses, NULL);
         }
     }
 }
@@ -2466,7 +2575,7 @@ static double updateVerticalRadius(CanyonCarverConfig ccc, uint64_t* rnd, double
     return g * verticalRadius * nextFloatBetween(rnd, 0.75F, 1.0F);
 }
 
-static void carveCanyonInner(CanyonCarverConfig ccc, int mc, uint64_t *rnd, int sourceChunkX, int sourceChunkZ, int offsetChunkX, int offsetChunkZ, char carvingMask[], Pos3List* poses) {
+static void carveCanyonInner(CanyonCarverConfig ccc, int mc, uint64_t *rnd, int sourceChunkX, int sourceChunkZ, int offsetChunkX, int offsetChunkZ, char carvingMask[], Pos3List* poses, CarveHasWaterCtx *hw) {
     int range = (ccc.range * 2 - 1) * 16;
     double x = (offsetChunkX << 4) + nextInt(rnd, 16);
     double y = ccc.y(rnd, ccc.minY, ccc.maxY, ccc.innerY);
@@ -2524,11 +2633,11 @@ static void carveCanyonInner(CanyonCarverConfig ccc, int mc, uint64_t *rnd, int 
             return;
         }
 
-        carveEllipsoid(sourceChunkX, sourceChunkZ, x, y, z, horizontalRadius, verticalRadius, worldMinY, worldHeight, carvingMask, shouldSkipCanyonCarve, widthFactors, poses);
+        carveEllipsoid(sourceChunkX, sourceChunkZ, x, y, z, horizontalRadius, verticalRadius, worldMinY, worldHeight, carvingMask, shouldSkipCanyonCarve, widthFactors, poses, hw);
     }
 }
 
-static void carveCaveInner(CaveCarverConfig ccc, uint64_t* rnd, int sourceChunkX, int sourceChunkZ, int chunkX, int chunkZ, int mc, char carvingMask[], Pos3List* poses);
+static void carveCaveInner(CaveCarverConfig ccc, uint64_t* rnd, int sourceChunkX, int sourceChunkZ, int chunkX, int chunkZ, int mc, char carvingMask[], Pos3List* poses, CarveHasWaterCtx *hw);
 
 void carveCave(uint64_t seed, int mc, int chunkX, int chunkZ, CaveCarverConfig ccc, int caveCarverType, int biomes[17][17], Pos3List* poses) {
     int worldHeight;
@@ -2553,16 +2662,16 @@ void carveCave(uint64_t seed, int mc, int chunkX, int chunkZ, CaveCarverConfig c
             if (!checkCaveStart(seed, offsetChunkX, offsetChunkZ, ccc, &rnd)) {
                 continue;
             }
-            carveCaveInner(ccc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, mc, carvingMask, poses);
+            carveCaveInner(ccc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, mc, carvingMask, poses, NULL);
         }
     }
 }
 
-static void createRoom(int sourceChunkX, int sourceChunkZ, double x, double y, double z, float radius, double horizontalVerticalRatio, int worldMinY, int worldHeight, char carvingMask[], double floorLevel, Pos3List* poses);
+static void createRoom(int sourceChunkX, int sourceChunkZ, double x, double y, double z, float radius, double horizontalVerticalRatio, int worldMinY, int worldHeight, char carvingMask[], double floorLevel, Pos3List* poses, CarveHasWaterCtx *hw);
 
-static void createTunnel(CaveCarverConfig ccc, int sourceChunkX, int sourceChunkZ, uint64_t seed, double x, double y, double z, double horizontalRadiusMultiplier, double verticalRadiusMultiplier, float thickness, float yaw, float pitch, int branchIndex, int branchCount, double horizontalVerticalRatio, int worldMinY, int worldHeight, char carvingMask[], double floorLevel, Pos3List* poses);
+static void createTunnel(CaveCarverConfig ccc, int sourceChunkX, int sourceChunkZ, uint64_t seed, double x, double y, double z, double horizontalRadiusMultiplier, double verticalRadiusMultiplier, float thickness, float yaw, float pitch, int branchIndex, int branchCount, double horizontalVerticalRatio, int worldMinY, int worldHeight, char carvingMask[], double floorLevel, Pos3List* poses, CarveHasWaterCtx *hw);
 
-static void carveCaveInner(CaveCarverConfig ccc, uint64_t* rnd, int sourceChunkX, int sourceChunkZ, int chunkX, int chunkZ, int mc, char carvingMask[], Pos3List* poses) {
+static void carveCaveInner(CaveCarverConfig ccc, uint64_t* rnd, int sourceChunkX, int sourceChunkZ, int chunkX, int chunkZ, int mc, char carvingMask[], Pos3List* poses, CarveHasWaterCtx *hw) {
     int worldMinY;
     int worldHeight;
     if (mc > MC_1_17_1) {
@@ -2593,7 +2702,7 @@ static void carveCaveInner(CaveCarverConfig ccc, uint64_t* rnd, int sourceChunkX
             if (mc <= MC_1_17_1) {
                 nextLong(rnd);
             }
-            createRoom(sourceChunkX, sourceChunkZ, x, y, z, radius, yScale, worldMinY, worldHeight, carvingMask, floorLevel, poses);
+            createRoom(sourceChunkX, sourceChunkZ, x, y, z, radius, yScale, worldMinY, worldHeight, carvingMask, floorLevel, poses, hw);
             m += nextInt(rnd, 4);
         }
 
@@ -2602,18 +2711,18 @@ static void carveCaveInner(CaveCarverConfig ccc, uint64_t* rnd, int sourceChunkX
             float o = (nextFloat(rnd) - 0.5F) / 4.0F;
             float r = ccc.thickness(rnd);
             int s = range - nextInt(rnd, range / 4);
-            createTunnel(ccc, sourceChunkX, sourceChunkZ, nextLong(rnd), x, y, z, horizontalRadius, verticalRadius, r, q, o, 0, s, ccc.tunnelYScale, worldMinY, worldHeight, carvingMask, floorLevel, poses);
+            createTunnel(ccc, sourceChunkX, sourceChunkZ, nextLong(rnd), x, y, z, horizontalRadius, verticalRadius, r, q, o, 0, s, ccc.tunnelYScale, worldMinY, worldHeight, carvingMask, floorLevel, poses, hw);
         }
     }
 }
 
-static void createRoom(int sourceChunkX, int sourceChunkZ, double x, double y, double z, float radius, double horizontalVerticalRatio, int worldMinY, int worldHeight, char carvingMask[], double floorLevel, Pos3List* poses) {
+static void createRoom(int sourceChunkX, int sourceChunkZ, double x, double y, double z, float radius, double horizontalVerticalRatio, int worldMinY, int worldHeight, char carvingMask[], double floorLevel, Pos3List* poses, CarveHasWaterCtx *hw) {
     double horizontalRadius = 1.5 + sin(PI / 2) * radius;
     double verticalRadius = horizontalRadius * horizontalVerticalRatio;
-    carveEllipsoid(sourceChunkX, sourceChunkZ, x + 1.0, y, z, horizontalRadius, verticalRadius, worldMinY, worldHeight, carvingMask, shouldSkipCaveCarve, &floorLevel, poses);
+    carveEllipsoid(sourceChunkX, sourceChunkZ, x + 1.0, y, z, horizontalRadius, verticalRadius, worldMinY, worldHeight, carvingMask, shouldSkipCaveCarve, &floorLevel, poses, hw);
 }
 
-static void createTunnel(CaveCarverConfig ccc, int sourceChunkX, int sourceChunkZ, uint64_t seed, double x, double y, double z, double horizontalRadiusMultiplier, double verticalRadiusMultiplier, float thickness, float yaw, float pitch, int branchIndex, int branchCount, double horizontalVerticalRatio, int worldMinY, int worldHeight, char carvingMask[], double floorLevel, Pos3List* poses) {
+static void createTunnel(CaveCarverConfig ccc, int sourceChunkX, int sourceChunkZ, uint64_t seed, double x, double y, double z, double horizontalRadiusMultiplier, double verticalRadiusMultiplier, float thickness, float yaw, float pitch, int branchIndex, int branchCount, double horizontalVerticalRatio, int worldMinY, int worldHeight, char carvingMask[], double floorLevel, Pos3List* poses, CarveHasWaterCtx *hw) {
     uint64_t rnd;
     setSeed(&rnd, seed);
     int i = nextInt(&rnd, branchCount / 2) + branchCount / 4;
@@ -2639,9 +2748,9 @@ static void createTunnel(CaveCarverConfig ccc, int sourceChunkX, int sourceChunk
         f += (f4 - f5) * f6 * 4.0F;
         if (j == i && thickness > 1.0F) {
             uint64_t s1 = nextLong(&rnd); float t1 = nextFloat(&rnd);
-            createTunnel(ccc, sourceChunkX, sourceChunkZ, s1, x, y, z, horizontalRadiusMultiplier, verticalRadiusMultiplier, t1 * 0.5F + 0.5F, yaw - (float) (PI / 2), pitch / 3.0F, j, branchCount, 1.0, worldMinY, worldHeight, carvingMask, floorLevel, poses);
+            createTunnel(ccc, sourceChunkX, sourceChunkZ, s1, x, y, z, horizontalRadiusMultiplier, verticalRadiusMultiplier, t1 * 0.5F + 0.5F, yaw - (float) (PI / 2), pitch / 3.0F, j, branchCount, 1.0, worldMinY, worldHeight, carvingMask, floorLevel, poses, hw);
             uint64_t s2 = nextLong(&rnd); float t2 = nextFloat(&rnd);
-            createTunnel(ccc, sourceChunkX, sourceChunkZ, s2, x, y, z, horizontalRadiusMultiplier, verticalRadiusMultiplier, t2 * 0.5F + 0.5F, yaw + (float) (PI / 2), pitch / 3.0F, j, branchCount, 1.0, worldMinY, worldHeight, carvingMask, floorLevel, poses);
+            createTunnel(ccc, sourceChunkX, sourceChunkZ, s2, x, y, z, horizontalRadiusMultiplier, verticalRadiusMultiplier, t2 * 0.5F + 0.5F, yaw + (float) (PI / 2), pitch / 3.0F, j, branchCount, 1.0, worldMinY, worldHeight, carvingMask, floorLevel, poses, hw);
             return;
         }
 
@@ -2651,11 +2760,11 @@ static void createTunnel(CaveCarverConfig ccc, int sourceChunkX, int sourceChunk
             return;
         }
 
-        carveEllipsoid(sourceChunkX, sourceChunkZ, x, y, z, d * horizontalRadiusMultiplier, e * verticalRadiusMultiplier, worldMinY, worldHeight, carvingMask, shouldSkipCaveCarve, &floorLevel, poses);
+        carveEllipsoid(sourceChunkX, sourceChunkZ, x, y, z, d * horizontalRadiusMultiplier, e * verticalRadiusMultiplier, worldMinY, worldHeight, carvingMask, shouldSkipCaveCarve, &floorLevel, poses, hw);
     }
 }
 
-static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z, double horizontalRadius, double verticalRadius, int worldMinY, int worldHeight, char carvingMask[], int (*shouldSkip)(double, double, double, int, int, void*), void* arg, Pos3List* poses) {
+static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z, double horizontalRadius, double verticalRadius, int worldMinY, int worldHeight, char carvingMask[], int (*shouldSkip)(double, double, double, int, int, void*), void* arg, Pos3List* poses, CarveHasWaterCtx *hw) {
     const int startChunkX = chunkX << 4;
     const int startChunkZ = chunkZ << 4;
     const double midChunkX = startChunkX + 8;
@@ -2678,6 +2787,28 @@ static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z,
     const double floorMaxZ = floor(z + horizontalRadius) - startChunkZ + 1;
     const int maxZ = MIN(floorMaxZ, 15);
 
+    // java WorldCarver.carveSphere aborts the whole sphere when water is found
+    // on the shell of the (java-exact) sphere box; air carvers only
+    if (hw) {
+        int jo = minX;
+        int jpEx = MIN((int)floorMaxX, 16);
+        int jq = minY;
+        int jr = MIN((int)floorMaxY, 248);
+        int js = minZ;
+        int jtEx = MIN((int)floorMaxZ, 16);
+        for (int q2 = jo; q2 < jpEx; q2++) {
+            for (int r2 = js; r2 < jtEx; r2++) {
+                int edge = (q2 == jo || q2 == jpEx - 1 || r2 == js || r2 == jtEx - 1);
+                for (int s2 = jq - 1; s2 <= jr + 1; s2++) {
+                    if (chwNaturalWaterAt(hw, q2, s2, r2))
+                        return;
+                    if (s2 != jr + 1 && !edge)
+                        s2 = jr;
+                }
+            }
+        }
+    }
+
     for (int relX = minX; relX <= maxX; relX++) {
         int absX = startChunkX + relX;
         double relativeX = (absX + 0.5 - x) / horizontalRadius;
@@ -2697,7 +2828,17 @@ static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z,
     }
 }
 
-void applyAllCarvers(Generator *g, int chunkX, int chunkZ, Pos3List* poses, Pos3List* waterPoses) {
+void applyAllCarvers(Generator *g, const SurfaceNoise *sn, int chunkX, int chunkZ, Pos3List* poses, Pos3List* waterPoses) {
+    CarveHasWaterCtx hwCtx;
+    CarveHasWaterCtx *hw = NULL;
+    if (sn) {
+        hwCtx.g = g;
+        hwCtx.sn = sn;
+        hwCtx.chunkX = chunkX;
+        hwCtx.chunkZ = chunkZ;
+        memset(hwCtx.colValid, 0, sizeof(hwCtx.colValid));
+        hw = &hwCtx;
+    }
     int worldHeight;
     if (g->mc > MC_1_17_1) {
         worldHeight = g->dim == DIM_OVERWORLD ? 384 : 128;
@@ -2710,19 +2851,14 @@ void applyAllCarvers(Generator *g, int chunkX, int chunkZ, Pos3List* poses, Pos3
     memset(airCarvingMask, 0, slots);
     memset(waterCarvingMask, 0, slots);
 
-    // TODO: replace with genBiomes?
-    int biomes[17][17];
-    for (int relChunkX = -8; relChunkX <= 8; ++relChunkX) {
-        for (int relChunkZ = -8; relChunkZ <= 8; ++relChunkZ) {
-            biomes[relChunkZ + 8][relChunkX + 8] = getBiomeAt(g, 4, (chunkX + relChunkX) << 2, 0, (chunkZ + relChunkZ) << 2);
-        }
-    }
+    // java ChunkGenerator.applyCarvers takes the carver list from the TARGET
+    // chunk's biome (corner quart) and uses it for ALL 17x17 offset chunks
+    int biome = getBiomeAt(g, 4, chunkX << 2, 0, chunkZ << 2);
 
     for (int relChunkX = -8; relChunkX <= 8; ++relChunkX) {
         for (int relChunkZ = -8; relChunkZ <= 8; ++relChunkZ) {
             int offsetChunkX = chunkX + relChunkX;
             int offsetChunkZ = chunkZ + relChunkZ;
-            int biome = biomes[relChunkZ + 8][relChunkX + 8];
 
             for (int canyonCarverType = 0; canyonCarverType < CANYON_CARVER_NUM; ++canyonCarverType) {
                 CanyonCarverConfig ccc;
@@ -2739,8 +2875,8 @@ void applyAllCarvers(Generator *g, int chunkX, int chunkZ, Pos3List* poses, Pos3
                 if (!checkCanyonStart(g->seed, offsetChunkX, offsetChunkZ, ccc, &rnd)) {
                     continue;
                 }
-                if (canyonCarverType == UNDERWATER_CANYON_CARVER) carveCanyonInner(ccc, g->mc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, waterCarvingMask, waterPoses);
-                else carveCanyonInner(ccc, g->mc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, airCarvingMask, poses);
+                if (canyonCarverType == UNDERWATER_CANYON_CARVER) carveCanyonInner(ccc, g->mc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, waterCarvingMask, waterPoses, NULL);
+                else carveCanyonInner(ccc, g->mc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, airCarvingMask, poses, hw);
             }
 
             for (int caveCarverType = 0; caveCarverType < CAVE_CARVER_NUM; ++caveCarverType) {
@@ -2754,12 +2890,18 @@ void applyAllCarvers(Generator *g, int chunkX, int chunkZ, Pos3List* poses, Pos3
                 if (!isViableCaveBiome(caveCarverType, biome)) {
                     continue;
                 }
+                // 1.16.2..1.17 ocean biomes use OCEAN_CAVE (air stage, 1/15)
+                // instead of the plain CAVE carver
+                if (caveCarverType == CAVE_CARVER && g->mc > MC_1_16_1 && g->mc <= MC_1_17_1 &&
+                    isOceanic(biome)) {
+                    continue;
+                }
                 uint64_t rnd;
                 if (!checkCaveStart(g->seed, offsetChunkX, offsetChunkZ, ccc, &rnd)) {
                     continue;
                 }
-                if (caveCarverType == OCEAN_CAVE_CARVER || caveCarverType == UNDERWATER_CAVE_CARVER) carveCaveInner(ccc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, g->mc, waterCarvingMask, waterPoses);
-                else carveCaveInner(ccc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, g->mc, airCarvingMask, poses);
+                if (caveCarverType == UNDERWATER_CAVE_CARVER) carveCaveInner(ccc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, g->mc, waterCarvingMask, waterPoses, NULL);
+                else carveCaveInner(ccc, &rnd, chunkX, chunkZ, offsetChunkX, offsetChunkZ, g->mc, airCarvingMask, poses, hw);
             }
         }
     }
