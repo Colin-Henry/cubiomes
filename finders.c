@@ -2326,7 +2326,12 @@ int getCaveCarverConfig(int caveCarverType, int mc, int biome, CaveCarverConfig*
     switch (caveCarverType) {
     case CAVE_CARVER:
         if (mc <= MC_1_17_1) {
-            if (isDeepOcean(biome) || biome == frozen_ocean) *cconf = c_cave_deep_ocean_113;
+            // vanilla addOceanCarvers (1.13..1.16.1) gives ALL ocean biomes
+            // CAVE at 1/15 on the AIR stage (verified in 1.16.1 bytecode:
+            // BiomeDefaultFeatures.addOceanCarvers, 0.06666667F, and every
+            // ocean biome class calls it); 1.16.2+ skip CAVE in oceans and
+            // run OCEAN_CAVE instead, so this branch only bites <= 1.16.1
+            if (isOceanic(biome)) *cconf = c_cave_deep_ocean_113;
             else *cconf = c_cave_113;
         }
         else *cconf = c_cave_118;
