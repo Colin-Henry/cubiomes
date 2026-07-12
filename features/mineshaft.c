@@ -534,66 +534,10 @@ static inline double msLerp(double part, double from, double to) {
 #define MS_DENS_CELLS 20
 static void msComputeColumnDens(Generator *g, const SurfaceNoise *sn, int x, int z,
                                 double dens[2][2][MS_DENS_CELLS]) {
-    const float biome_kernel[25] = { // with 10 / (sqrt(i**2 + j**2) + 0.2)
-        3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
-        4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
-        4.545454545, 8.333333333, 50.00000000, 8.333333333, 4.545454545,
-        4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
-        3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
-    };
-
     int px = x >> 2, pz = z >> 2;
-    Range r = {4, px-2, pz-2, 6, 6, 0, 1};
-    int *bigCache = allocCache(g, r);
-    genBiomes(g, bigCache, r);
-
-    for (int dx = 0; dx <= 1; dx++) {
-        for (int dz = 0; dz <= 1; dz++) {
-            int cx = px + dx, cz = pz + dz;
-            double d0, s0;
-            double wt = 0, ws = 0, wd = 0;
-
-            getBiomeDepthAndScale(bigCache[(2+dz)*r.sx + (2+dx)], &d0, &s0, 0);
-
-            for (int jj = 0; jj < 5; jj++) {
-                for (int ii = 0; ii < 5; ii++) {
-                    double d, s;
-                    int id = bigCache[(jj+dz)*r.sx + (ii+dx)];
-                    getBiomeDepthAndScale(id, &d, &s, 0);
-                    float weight = biome_kernel[jj*5+ii] / (d + 2);
-                    if (d > d0)
-                        weight *= 0.5;
-                    ws += s * weight;
-                    wd += d * weight;
-                    wt += weight;
-                }
-            }
-            ws /= wt;
-            wd /= wt;
-            ws = ws * 0.9 + 0.1;
-            wd = (wd * 4.0 - 1) / 8;
-            ws = 96 / ws;
-            wd = wd * 17./64;
-
-            double off = sampleOctaveAmp(&sn->octdepth, cx*200, 10, cz*200, 1, 0, 1);
-            off *= 65535./8000;
-            if (off < 0) off = -0.3 * off;
-            off = off * 3 - 2;
-            if (off > 1) off = 1;
-            off *= 17./64;
-            if (off < 0) off *= 1./28;
-            else off *= 1./40;
-
-            for (int qy = 0; qy < MS_DENS_CELLS; qy++) {
-                double n0 = sampleSurfaceNoise(sn, cx, qy, cz);
-                double fall = 1 - 2 * qy / 32.0 + off - 0.46875;
-                fall = ws * (fall + wd);
-                n0 += (fall > 0 ? 4*fall : fall);
-                dens[dx][dz][qy] = n0;
-            }
-        }
-    }
-    free(bigCache);
+    for (int dx = 0; dx <= 1; dx++)
+        for (int dz = 0; dz <= 1; dz++)
+            surfaceCornerDens(g, sn, px + dx, pz + dz, dens[dx][dz]);
 }
 
 static inline double msColDensAt(const double dens[2][2][MS_DENS_CELLS], int x, int z, int y) {
@@ -774,8 +718,24 @@ static void msSimLakesInto(Generator *g, SurfaceNoise *sn, MsChunkMask *tgt, MsC
     }
 }
 
+// per-structure cache of applyAllCarvers results: every chunk in the pass
+// list gets carved once and reused (main pass + up to 4 lake-neighbor uses)
+STRUCT(MsCarverCache) {
+    Pos3List air, water;
+    int valid;
+};
+
+static void msGetCarvers(Generator *g, SurfaceNoise *sn, MsCarverCache *cc, int cx16, int cz16) {
+    if (!cc->valid) {
+        createPos3List(&cc->air, 1);
+        createPos3List(&cc->water, 1);
+        applyAllCarvers(g, sn, cx16 >> 4, cz16 >> 4, &cc->air, &cc->water);
+        cc->valid = 1;
+    }
+}
+
 static void msApplyLakes(Generator *g, SurfaceNoise *sn, MsChunkMask *tgt, int mc, uint64_t seed,
-                         int *chunkXs, int *chunkZs, int nchunks, int ci) {
+                         int *chunkXs, int *chunkZs, int nchunks, int ci, MsCarverCache *carverCache) {
     // sources whose blob (origin+15) can reach this chunk: itself, W, N, NW --
     // but a neighbor's lake only exists if that chunk was decorated earlier
     int candX[4], candZ[4], candIdx[4];
@@ -810,14 +770,10 @@ static void msApplyLakes(Generator *g, SurfaceNoise *sn, MsChunkMask *tgt, int m
             MsChunkMask *src = (MsChunkMask*)malloc(sizeof(MsChunkMask));
             src->cx = candX[c];
             src->cz = candZ[c];
-            Pos3List a2, w2;
-            createPos3List(&a2, 1);
-            createPos3List(&w2, 1);
-            applyAllCarvers(g, sn, candX[c] >> 4, candZ[c] >> 4, &a2, &w2);
-            msFillMask(src->air, &a2, candX[c], candZ[c]);
-            msFillMask(src->water, &w2, candX[c], candZ[c]);
-            freePos3List(&a2);
-            freePos3List(&w2);
+            MsCarverCache *cc = &carverCache[candIdx[c]];
+            msGetCarvers(g, sn, cc, candX[c], candZ[c]);
+            msFillMask(src->air, &cc->air, candX[c], candZ[c]);
+            msFillMask(src->water, &cc->water, candX[c], candZ[c]);
             msSimLakesInto(g, sn, tgt, src, mc, seed, candX[c], candZ[c]);
             free(src);
         }
@@ -898,27 +854,29 @@ static void maybePlaceCobWeb(Generator *g, const SurfaceNoise *sn, MsChunkMask *
     }
 }
 
-// cacheing (caching?) the last 4 biomes since biomes are 4:1 and getBiomeAt is expensive
-int msLookupBiome(Generator *g, int px, int pz) {
-    static uint64_t cacheSeed[4];
-    static int cachePx[4];
-    static int cachePz[4];
-    static int cacheId[4];
-    static int cacheValid[4];
-    static int cacheNext;
+// hash-cached quart biomes (biomes are 4:1 and getBiomeAt is expensive);
+// direct-mapped, transparent: a miss or collision just recomputes
+#define MS_BIOME_BITS 17
+static uint64_t msBiomeCacheSeed[1 << MS_BIOME_BITS];
+static int msBiomeCachePx[1 << MS_BIOME_BITS];
+static int msBiomeCachePz[1 << MS_BIOME_BITS];
+static int msBiomeCacheId[1 << MS_BIOME_BITS];
+static uint8_t msBiomeCacheValid[1 << MS_BIOME_BITS];
 
-    for (int i = 0; i < 4; i++) {
-        if (cacheValid[i] && cacheSeed[i] == g->seed && cachePx[i] == px && cachePz[i] == pz)
-            return cacheId[i];
-    }
+int msLookupBiome(Generator *g, int px, int pz) {
+    uint32_t h = ((uint32_t)px * 2654435761u) ^ ((uint32_t)pz * 668265263u)
+               ^ (uint32_t)g->seed ^ (uint32_t)(g->seed >> 32);
+    uint32_t i = h & ((1 << MS_BIOME_BITS) - 1);
+    if (msBiomeCacheValid[i] && msBiomeCacheSeed[i] == g->seed &&
+        msBiomeCachePx[i] == px && msBiomeCachePz[i] == pz)
+        return msBiomeCacheId[i];
 
     int id = getBiomeAt(g, 4, px, 0, pz);
-    cacheSeed[cacheNext] = g->seed;
-    cachePx[cacheNext] = px;
-    cachePz[cacheNext] = pz;
-    cacheId[cacheNext] = id;
-    cacheValid[cacheNext] = 1;
-    cacheNext = (cacheNext + 1) % 4;
+    msBiomeCacheSeed[i] = g->seed;
+    msBiomeCachePx[i] = px;
+    msBiomeCachePz[i] = pz;
+    msBiomeCacheId[i] = id;
+    msBiomeCacheValid[i] = 1;
     return id;
 }
 
@@ -1013,6 +971,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
         chunkZs[b+1] = keyZ;
     }
     int *removed = (int*)calloc(count, sizeof(int));
+    MsCarverCache *carverCache = (MsCarverCache*)calloc(nchunks, sizeof(MsCarverCache));
 
     // slow code ahead
     for (int ci = 0; ci < nchunks; ci++) {
@@ -1021,20 +980,16 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
         uint64_t populationSeed = getPopulationSeed(mc, seed, cx, cz);
         rnd.setSeed(rnd.state, populationSeed + ssconf.generationStep * 10000 + ssconf.decoratorIndex);
 
-        Pos3List airCarvers;
-        Pos3List waterCarvers;
-        createPos3List(&airCarvers, 1);
-        createPos3List(&waterCarvers, 1);
-        applyAllCarvers(g, sn, cx >> 4, cz >> 4, &airCarvers, &waterCarvers);
+        msGetCarvers(g, sn, &carverCache[ci], cx, cz);
 
         MsChunkMask cm;
         cm.cx = cx;
         cm.cz = cz;
-        msFillMask(cm.air, &airCarvers, cx, cz);
-        msFillMask(cm.water, &waterCarvers, cx, cz);
+        msFillMask(cm.air, &carverCache[ci].air, cx, cz);
+        msFillMask(cm.water, &carverCache[ci].water, cx, cz);
         memset(cm.topHValid, 0, sizeof(cm.topHValid));
         memset(cm.ovl, 0, sizeof(cm.ovl));
-        msApplyLakes(g, sn, &cm, mc, seed, chunkXs, chunkZs, nchunks, ci);
+        msApplyLakes(g, sn, &cm, mc, seed, chunkXs, chunkZs, nchunks, ci, carverCache);
 
         for (int i = 0; i < count; ++i) {
             Piece *p = &list[i];
@@ -1343,10 +1298,15 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                     fprintf(stderr, "CDUMP %d %d %d %s\n", x, y, z, what);
             }
         }
-        freePos3List(&airCarvers);
-        freePos3List(&waterCarvers);
         }
 
+    for (int q = 0; q < nchunks; q++) {
+        if (carverCache[q].valid) {
+            freePos3List(&carverCache[q].air);
+            freePos3List(&carverCache[q].water);
+        }
+    }
+    free(carverCache);
     free(chunkXs);
     free(chunkZs);
     free(removed);

@@ -144,6 +144,15 @@ int mapApproxHeight(float *y, int *ids, const Generator *g,
  */
 int isNaturalWater(const Generator *g, const SurfaceNoise *sn, int x, int y, int z);
 
+/*
+ * Cached cell-density profile (cells qy 0..19) for one noise-cell corner at
+ * quart coordinates (cx,cz): biome-kernel depth/scale weighting + depth noise
+ * + surface noise, i.e. the per-corner part of isNaturalWater. Values are
+ * identical to inline computation; the cache is transparent.
+ */
+void surfaceCornerDens(const Generator *g, const SurfaceNoise *sn, int cx, int cz,
+                       double out[20]);
+
 #ifdef __cplusplus
 }
 #endif

@@ -2425,66 +2425,10 @@ STRUCT(CarveHasWaterCtx) {
 
 static void chwComputeColumnDens(const Generator *g, const SurfaceNoise *sn, int x, int z,
                                  double dens[2][2][20]) {
-    const float biome_kernel[25] = { // with 10 / (sqrt(i**2 + j**2) + 0.2)
-        3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
-        4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
-        4.545454545, 8.333333333, 50.00000000, 8.333333333, 4.545454545,
-        4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
-        3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
-    };
-
     int px = x >> 2, pz = z >> 2;
-    Range r = {4, px-2, pz-2, 6, 6, 0, 1};
-    int *bigCache = allocCache(g, r);
-    genBiomes(g, bigCache, r);
-
-    for (int dx = 0; dx <= 1; dx++) {
-        for (int dz = 0; dz <= 1; dz++) {
-            int cx = px + dx, cz = pz + dz;
-            double d0, s0;
-            double wt = 0, ws = 0, wd = 0;
-
-            getBiomeDepthAndScale(bigCache[(2+dz)*r.sx + (2+dx)], &d0, &s0, 0);
-
-            for (int jj = 0; jj < 5; jj++) {
-                for (int ii = 0; ii < 5; ii++) {
-                    double d, sc;
-                    int id = bigCache[(jj+dz)*r.sx + (ii+dx)];
-                    getBiomeDepthAndScale(id, &d, &sc, 0);
-                    float weight = biome_kernel[jj*5+ii] / (d + 2);
-                    if (d > d0)
-                        weight *= 0.5;
-                    ws += sc * weight;
-                    wd += d * weight;
-                    wt += weight;
-                }
-            }
-            ws /= wt;
-            wd /= wt;
-            ws = ws * 0.9 + 0.1;
-            wd = (wd * 4.0 - 1) / 8;
-            ws = 96 / ws;
-            wd = wd * 17./64;
-
-            double off = sampleOctaveAmp(&sn->octdepth, cx*200, 10, cz*200, 1, 0, 1);
-            off *= 65535./8000;
-            if (off < 0) off = -0.3 * off;
-            off = off * 3 - 2;
-            if (off > 1) off = 1;
-            off *= 17./64;
-            if (off < 0) off *= 1./28;
-            else off *= 1./40;
-
-            for (int qy = 0; qy < 20; qy++) {
-                double n0 = sampleSurfaceNoise(sn, cx, qy, cz);
-                double fall = 1 - 2 * qy / 32.0 + off - 0.46875;
-                fall = ws * (fall + wd);
-                n0 += (fall > 0 ? 4*fall : fall);
-                dens[dx][dz][qy] = n0;
-            }
-        }
-    }
-    free(bigCache);
+    for (int dx = 0; dx <= 1; dx++)
+        for (int dz = 0; dz <= 1; dz++)
+            surfaceCornerDens(g, sn, px + dx, pz + dz, dens[dx][dz]);
 }
 
 static inline double chwLerp(double part, double from, double to) {
@@ -2498,6 +2442,11 @@ static int chwNaturalWaterAt(CarveHasWaterCtx *hw, int lx, int y, int lz) {
     if (!hw->colValid[li]) {
         int x = (hw->chunkX << 4) + lx;
         int z = (hw->chunkZ << 4) + lz;
+        // cheap worst-case bound for this exact query; only pay for the
+        // full density column once a query survives the bound
+        extern int msCouldBeNaturalWater(Generator *g, int x, int y, int z);
+        if (!msCouldBeNaturalWater((Generator*)hw->g, x, y, z))
+            return 0;
         double dens[2][2][20];
         chwComputeColumnDens(hw->g, hw->sn, x, z, dens);
         uint64_t bits = 0;
