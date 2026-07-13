@@ -487,24 +487,18 @@ static int msIsLiquid(Generator *g, SurfaceNoise *sn, MsChunkMask *cm, int x, in
     return msCouldBeNaturalWater(g, x, y, z) && isNaturalWater(g, sn, x, y, z);
 }
 
-// java StructurePiece.edgesLiquid: expanded piece BB clipped to the chunk box
-// (x/z chunk bounds, y in [1,512]), then the 6 faces of the CLIPPED box are
-// tested; at chunk borders this samples columns inside the piece volume
-static int msEdgesLiquid(Generator *g, SurfaceNoise *sn, MsChunkMask *cm, Piece *p) {
-    int cx = cm->cx, cz = cm->cz;
-    int i0 = MAX(p->bb0.x - 1, cx),      j0 = MAX(p->bb0.y - 1, 1),   k0 = MAX(p->bb0.z - 1, cz);
-    int i1 = MIN(p->bb1.x + 1, cx + 15), j1 = MIN(p->bb1.y + 1, 512), k1 = MIN(p->bb1.z + 1, cz + 15);
-    for (int x = i0; x <= i1; x++)
-        for (int z = k0; z <= k1; z++)
-            if (msIsLiquid(g, sn, cm, x, j0, z) || msIsLiquid(g, sn, cm, x, j1, z))
+int touchesLiquid(Generator *g, SurfaceNoise *sn, MsChunkMask *cm, Piece *p) {
+    for (int x = p->bb0.x - 1; x <= p->bb1.x + 1; x++)
+        for (int z = p->bb0.z - 1; z <= p->bb1.z + 1; z++)
+            if (msIsLiquid(g, sn, cm, x, p->bb0.y - 1, z) || msIsLiquid(g, sn, cm, x, p->bb1.y + 1, z))
                 return 1;
-    for (int x = i0; x <= i1; x++)
-        for (int y = j0; y <= j1; y++)
-            if (msIsLiquid(g, sn, cm, x, y, k0) || msIsLiquid(g, sn, cm, x, y, k1))
+    for (int x = p->bb0.x - 1; x <= p->bb1.x + 1; x++)
+        for (int y = p->bb0.y - 1; y <= p->bb1.y + 1; y++)
+            if (msIsLiquid(g, sn, cm, x, y, p->bb0.z - 1) || msIsLiquid(g, sn, cm, x, y, p->bb1.z + 1))
                 return 1;
-    for (int z = k0; z <= k1; z++)
-        for (int y = j0; y <= j1; y++)
-            if (msIsLiquid(g, sn, cm, i0, y, z) || msIsLiquid(g, sn, cm, i1, y, z))
+    for (int z = p->bb0.z - 1; z <= p->bb1.z + 1; z++)
+        for (int y = p->bb0.y - 1; y <= p->bb1.y + 1; y++)
+            if (msIsLiquid(g, sn, cm, p->bb0.x - 1, y, z) || msIsLiquid(g, sn, cm, p->bb1.x + 1, y, z))
                 return 1;
     return 0;
 }
@@ -938,7 +932,6 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
     int *removed = (int*)calloc(count, sizeof(int));
     MsCarverCache *carverCache = (MsCarverCache*)calloc(nchunks, sizeof(MsCarverCache));
 
-    // slow code ahead
     for (int ci = 0; ci < nchunks; ci++) {
         int cx = chunkXs[ci], cz = chunkZs[ci];
         CREATE_RANDOM_SOURCE(rnd, legacy);
@@ -963,12 +956,13 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                   p->bb1.z >= cz && p->bb0.z <= cz + 15)) {
                 continue;
             }
-                if (msEdgesLiquid(g, sn, &cm, p)) {
-                    removed[i] = 1;
-                    continue;
-                }
 
-                switch (p->type) {
+            if (touchesLiquid(g, sn, &cm, p)) {
+                removed[i] = 1;
+                continue;
+            }
+
+            switch (p->type) {
                 case MS_CORRIDOR: {
                     // isInInvalidLocation ignored
                     int numSections;
