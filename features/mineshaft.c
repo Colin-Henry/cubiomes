@@ -579,11 +579,6 @@ static int msTopSolid(Generator *g, const SurfaceNoise *sn, MsChunkMask *cm, int
     }
     cm->topH[li] = (int16_t)top;
     cm->topHValid[li] = 1;
-    {
-        extern int msDbgOn, msDbgX, msDbgZ;
-        if (msDbgOn && (x - msDbgX)*(x - msDbgX) + (z - msDbgZ)*(z - msDbgZ) <= 400)
-            fprintf(stderr, "DBG TOPSOLID (%d,%d) = %d\n", x, z, top);
-    }
     return top;
 }
 
@@ -801,27 +796,9 @@ static void msOvlSetLocal(MsChunkMask *cm, Piece *p, int x, int y, int z, int v)
     msOvlSet(cm, x, p->bb0.y + y, z, v);
 }
 
-static int msDbgPiece(Piece *p);
-extern int msDbgOn;
-
 static void placeSupport(Generator *g, const SurfaceNoise *sn, Piece *p, int x0, int z, int x1,
                          RandomSource rnd, MsChunkMask *cm) {
     int sup = isSupportingBox(g, sn, p, x0, x1, z, cm);
-    if (msDbgOn && msDbgPiece(p)) {
-        int tx = x0, tz = z;
-        rotPos(p->bb0, p->bb1, &tx, &tz, p->rot);
-        fprintf(stderr, "DBG SUPPORT bb0=(%d,%d,%d) chunk=(%d,%d) z=%d worldpos=(%d,%d) supporting=%d cols:",
-            p->bb0.x, p->bb0.y, p->bb0.z, cm->cx>>4, cm->cz>>4, z, tx, tz, sup);
-        for (int x = x0; x <= x1; x++) {
-            int cxx = x, czz = z;
-            rotPos(p->bb0, p->bb1, &cxx, &czz, p->rot);
-            int in = (cxx >= cm->cx && cxx < cm->cx + 16 && czz >= cm->cz && czz < cm->cz + 16);
-            fprintf(stderr, " (%d,%d,%d)in=%d ovl=%d air=%d",
-                cxx, p->bb0.y + 3, czz, in, msOvlGet(cm, cxx, p->bb0.y + 3, czz),
-                in ? msIsAirBlock(g, sn, cm, cxx, p->bb0.y + 3, czz) : -1);
-        }
-        fprintf(stderr, "\n");
-    }
     if (sup) {
         for (int yy = 0; yy <= 1; yy++) {
             msOvlSetLocal(cm, p, x0, yy, z, MS_OVL_DECOR);   // fence columns
@@ -906,21 +883,6 @@ int msCouldBeNaturalWater(Generator *g, int x, int y, int z) { // tried to optim
     return worstCaseDensity <= 0;
 }
 
-// --- temporary debug instrumentation (msDbg*) ---
-int msDbgOn = 0;
-int msDbgX = 0, msDbgZ = 0;
-static int msDbgPiece(Piece *p) {
-    if (!msDbgOn) return 0;
-    if (msDbgOn == 3) return 1;
-    if (msDbgOn == 2) {
-        int cxd = (msDbgX >> 4) << 4, czd = (msDbgZ >> 4) << 4;
-        return p->bb1.x >= cxd && p->bb0.x <= cxd + 15 &&
-               p->bb1.z >= czd && p->bb0.z <= czd + 15;
-    }
-    return msDbgX >= p->bb0.x - 2 && msDbgX <= p->bb1.x + 2 &&
-           msDbgZ >= p->bb0.z - 2 && msDbgZ <= p->bb1.z + 2;
-}
-
 int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ) {
     int count = getMineshaftPieces(g, list, n, mc, seed, chunkX, chunkZ);
 
@@ -943,8 +905,11 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
     int cMaxX = (maxX + 1) & ~15;
     int cMaxZ = (maxZ + 1) & ~15;
 
-    // added sorting by squared distance from origin chunk. otherwise it was not at all accurate for some reason
-    // TODO come up with a better fix than this
+    // chunks are processed in order of squared distance from the structure's
+    // start chunk: piece generation is chunk-order dependent in vanilla (a
+    // piece that hits liquid in one chunk stops generating in all later
+    // chunks), and this radial order matches worlds whose chunks generate
+    // outward from the structure (e.g. /tp to it in an unexplored area)
     int maxChunks = ((cMaxX - cMinX) / 16 + 1) * ((cMaxZ - cMinZ) / 16 + 1);
     int *chunkXs = (int*)malloc(maxChunks * sizeof(int));
     int *chunkZs = (int*)malloc(maxChunks * sizeof(int));
@@ -999,36 +964,8 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                 continue;
             }
                 if (msEdgesLiquid(g, sn, &cm, p)) {
-                    if (msDbgPiece(p)) {
-                        int i0 = MAX(p->bb0.x-1,cx), j0 = MAX(p->bb0.y-1,1), k0 = MAX(p->bb0.z-1,cz);
-                        int i1 = MIN(p->bb1.x+1,cx+15), j1 = MIN(p->bb1.y+1,512), k1 = MIN(p->bb1.z+1,cz+15);
-                        fprintf(stderr, "DBG REMOVE piece=%d type=%d bb=(%d,%d,%d)-(%d,%d,%d) chunk=(%d,%d) clip=[%d..%d][%d..%d][%d..%d]\n",
-                            i, p->type, p->bb0.x,p->bb0.y,p->bb0.z, p->bb1.x,p->bb1.y,p->bb1.z, cx>>4, cz>>4, i0,i1,j0,j1,k0,k1);
-                        for (int x = i0; x <= i1; x++)
-                        for (int y = j0; y <= j1 && y <= 255; y++)
-                        for (int z = k0; z <= k1; z++) {
-                            if (x != i0 && x != i1 && z != k0 && z != k1 && y != j0 && y != j1) continue;
-                            if (msIsLiquid(g, sn, &cm, x, y, z)) {
-                                int w = msMaskGet(cm.water, cx, cz, x, y, z);
-                                int a = msMaskGet(cm.air, cx, cz, x, y, z);
-                                double dd = 0;
-                                if (!w && !a) {
-                                    double dens[2][2][MS_DENS_CELLS];
-                                    msComputeColumnDens(g, sn, x, z, dens);
-                                    dd = msColDensAt(dens, x, z, y);
-                                }
-                                fprintf(stderr, "DBG   liquid at (%d,%d,%d) water=%d air=%d natural=%d dens=%.9f\n",
-                                    x, y, z, w, a, !w && !a, dd);
-                            }
-                        }
-                    }
                     removed[i] = 1;
                     continue;
-                }
-                if (msDbgPiece(p)) {
-                    fprintf(stderr, "DBG KEEP piece=%d type=%d bb=(%d,%d,%d)-(%d,%d,%d) chunk=(%d,%d) rails=%d spider=%d placedSpider=%d\n",
-                        i, p->type, p->bb0.x,p->bb0.y,p->bb0.z, p->bb1.x,p->bb1.y,p->bb1.z, cx>>4, cz>>4,
-                        p->additionalData&1, (p->additionalData>>1)&1, (p->additionalData>>2)&1);
                 }
 
                 switch (p->type) {
@@ -1096,11 +1033,6 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                                           chestPosZ >= cz && chestPosZ < cz + 16;
                             int posAir = inChunk && msIsAirBlock(g, sn, &cm, chestPosX, p->bb0.y, chestPosZ);
                             int floorAir = inChunk && msIsAirBlock(g, sn, &cm, chestPosX, p->bb0.y - 1, chestPosZ);
-                            if (msDbgPiece(p)) {
-                                fprintf(stderr, "DBG CHESTROLL piece=%d chunk=(%d,%d) sec=%d side=%c pos=(%d,%d) inchunk=%d posAir=%d floorAir=%d\n",
-                                    i, cx>>4, cz>>4, section, side == 0 ? 'A' : 'B',
-                                    chestPosX, chestPosZ, inChunk, posAir, floorAir);
-                            }
                             if (inChunk && posAir && !floorAir) {
                                 rnd.nextBoolean(rnd.state);
                                 p->chestPoses[p->chestCount] = (Pos) {chestPosX, chestPosZ};
@@ -1272,32 +1204,6 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                 default: UNREACHABLE();
                 }
             }
-        if (msDbgOn == 4 && (msDbgX >> 4) == (cx >> 4) && (msDbgZ >> 4) == (cz >> 4)) {
-            for (int y = 15; y <= 45; y++)
-            for (int lz = 0; lz < 16; lz++)
-            for (int lx = 0; lx < 16; lx++) {
-                int x = cx + lx, z = cz + lz;
-                int o = msOvlGet(&cm, x, y, z);
-                const char *what = NULL;
-                if (o == MS_OVL_AIR) what = "s_air";
-                else if (o == MS_OVL_SOLID) what = "s_solid";
-                else if (o == MS_OVL_DECOR) what = "s_decor";
-                else if (o == MS_OVL_WATER) what = "l_water";
-                else if (o == MS_OVL_LAVA) what = "l_lava";
-                else if (msMaskGet(cm.water, cx, cz, x, y, z))
-                    what = y == 10 ? "c_magma" : (y < 10 ? "c_lava" : "c_water");
-                else if (msMaskGet(cm.air, cx, cz, x, y, z))
-                    what = y >= 11 ? "c_air" : "c_lava";
-                else {
-                    double dd[2][2][MS_DENS_CELLS];
-                    msComputeColumnDens(g, sn, x, z, dd);
-                    double dv = msColDensAt(dd, x, z, y);
-                    if (dv <= 0) what = y < 63 ? "n_water" : "n_air";
-                }
-                if (what)
-                    fprintf(stderr, "CDUMP %d %d %d %s\n", x, y, z, what);
-            }
-        }
         }
 
     for (int q = 0; q < nchunks; q++) {

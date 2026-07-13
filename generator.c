@@ -766,10 +766,6 @@ int mapApproxHeight(float *y, int *ids, const Generator *g, const SurfaceNoise *
     return 0;
 }
 
-// cached per-corner cell-density profile: the biome-kernel weighting, depth
-// noise and surface noise for one noise-cell corner (quart coords), cells
-// qy 0..19; shared by isNaturalWater, the mineshaft column densities and the
-// carver hasWater check (identical math, identical doubles)
 #define CORNER_DENS_CELLS 20
 STRUCT(CornerDensEntry) {
     uint64_t seed;
