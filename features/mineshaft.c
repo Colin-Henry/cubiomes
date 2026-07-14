@@ -412,9 +412,9 @@ int getMineshaftPieces(Generator *g, Piece *list, int n, int mc, uint64_t seed, 
 }
 
 STRUCT(chunkMask) {
+    int cx, cz;
     uint8_t air[8192];
     uint8_t water[8192];
-    int cx, cz;
     int16_t topBlock[256];
     uint8_t topBlockValid[256];
     uint8_t details[32768];
@@ -555,12 +555,12 @@ static inline int isInterior(Generator *g, const SurfaceNoise *sn, chunkMask *cm
     return yAbove <= topSolidBlock(g, sn, cm, x, z);
 }
 
-STRUCT(MsCarverCache) {
+STRUCT(CarverCache) {
     Pos3List air, water;
     int valid;
 };
 
-static void carveChunk(Generator *g, SurfaceNoise *sn, MsCarverCache *cc, int cx16, int cz16) {
+static void carveChunk(Generator *g, SurfaceNoise *sn, CarverCache *cc, int cx16, int cz16) {
     if (!cc->valid) {
         createPos3List(&cc->air, 1);
         createPos3List(&cc->water, 1);
@@ -570,7 +570,7 @@ static void carveChunk(Generator *g, SurfaceNoise *sn, MsCarverCache *cc, int cx
 }
 
 static void writeLakesToChunk(Generator *g, SurfaceNoise *sn, chunkMask *tgt, int mc, uint64_t seed,
-                         int *chunkXs, int *chunkZs, int nchunks, int ci, MsCarverCache *carverCache) {
+                         int *chunkXs, int *chunkZs, int nchunks, int ci, CarverCache *carverCache) {
     static const int offs[4][2] = {{-16,-16},{-16,0},{0,-16},{0,0}}; // NW, W, N, self
     int order[4];
     Pos3List *ca[4], *cw[4];
@@ -756,7 +756,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
         chunkZs[b+1] = keyZ;
     }
     int *removed = (int*)calloc(count, sizeof(int));
-    MsCarverCache *carverCache = (MsCarverCache*)calloc(nchunks, sizeof(MsCarverCache));
+    CarverCache *carverCache = (CarverCache*)calloc(nchunks, sizeof(CarverCache));
 
     for (int ci = 0; ci < nchunks; ci++) {
         int cx = chunkXs[ci], cz = chunkZs[ci];
