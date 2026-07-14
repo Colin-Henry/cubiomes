@@ -555,8 +555,6 @@ static inline int isInterior(Generator *g, const SurfaceNoise *sn, chunkMask *cm
     return yAbove <= topSolidBlock(g, sn, cm, x, z);
 }
 
-// per-structure cache of applyAllCarvers results: every chunk in the pass
-// list gets carved once and reused (main pass + up to 4 lake-neighbor uses)
 STRUCT(MsCarverCache) {
     Pos3List air, water;
     int valid;
