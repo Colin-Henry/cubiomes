@@ -773,15 +773,18 @@ STRUCT(CornerDensEntry) {
     int valid;
     double dens[CORNER_DENS_CELLS];
 };
-#define CORNER_DENS_BITS 16
-static CornerDensEntry cornerDensCache[1 << CORNER_DENS_BITS];
+// the cache is a repeating 256x256 tile of the noise-cell corner grid: a
+// corner's slot is the low 8 bits of each coordinate, so two corners only
+// share a slot when they are an exact multiple of 256 cells (1024 blocks)
+// apart. The stored seed/cx/cz are checked before a slot is trusted, so a
+// collision or stale entry just recomputes and can never be wrong.
+static CornerDensEntry cornerDensCache[256 * 256];
 
 void surfaceCornerDens(const Generator *g, const SurfaceNoise *sn, int cx, int cz,
                        double out[CORNER_DENS_CELLS])
 {
-    uint32_t h = ((uint32_t)cx * 2654435761u) ^ ((uint32_t)cz * 668265263u)
-               ^ (uint32_t)g->seed ^ (uint32_t)(g->seed >> 32);
-    CornerDensEntry *e = &cornerDensCache[h & ((1 << CORNER_DENS_BITS) - 1)];
+    uint32_t i = (cx & 255) | ((cz & 255) << 8);
+    CornerDensEntry *e = &cornerDensCache[i];
     if (e->valid && e->seed == g->seed && e->cx == cx && e->cz == cz) {
         memcpy(out, e->dens, sizeof(e->dens));
         return;

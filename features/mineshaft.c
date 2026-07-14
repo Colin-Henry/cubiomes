@@ -814,8 +814,7 @@ static void placeSupport(Generator *g, const SurfaceNoise *sn, Piece *p, int x0,
 
 // java placeCobWeb: the roll itself is gated on isInterior (heightmap check
 // on the block above, world y = bb0.y + 3 for the corridor cobwebs at local y=2)
-static void maybePlaceCobWeb(Generator *g, const SurfaceNoise *sn, MsChunkMask *cm,
-                             Piece *p, RandomSource rnd, float chance, int x, int z) {
+static void maybePlaceCobWeb(Generator *g, const SurfaceNoise *sn, MsChunkMask *cm, Piece *p, RandomSource rnd, float chance, int x, int z) {
     int tx = x, tz = z;
     rotPos(p->bb0, p->bb1, &tx, &tz, p->rot);
     if (tx >= cm->cx && tx < cm->cx + 16 && tz >= cm->cz && tz < cm->cz + 16 &&
@@ -825,19 +824,20 @@ static void maybePlaceCobWeb(Generator *g, const SurfaceNoise *sn, MsChunkMask *
     }
 }
 
-// hash-cached quart biomes (biomes are 4:1 and getBiomeAt is expensive);
-// direct-mapped, transparent: a miss or collision just recomputes
-#define MS_BIOME_BITS 17
-static uint64_t msBiomeCacheSeed[1 << MS_BIOME_BITS];
-static int msBiomeCachePx[1 << MS_BIOME_BITS];
-static int msBiomeCachePz[1 << MS_BIOME_BITS];
-static int msBiomeCacheId[1 << MS_BIOME_BITS];
-static uint8_t msBiomeCacheValid[1 << MS_BIOME_BITS];
+// cached quart biomes (biomes are 4:1 and getBiomeAt is expensive); the
+// cache is a repeating 256x256 tile of the quart grid: a position's slot
+// is just the low 8 bits of each coordinate, so two positions only share
+// a slot when they are an exact multiple of 256 quarts (1024 blocks)
+// apart. The stored seed/px/pz are checked before a slot is trusted, so
+// a collision or stale entry just recomputes and can never be wrong.
+static uint64_t msBiomeCacheSeed[256 * 256];
+static int msBiomeCachePx[256 * 256];
+static int msBiomeCachePz[256 * 256];
+static int msBiomeCacheId[256 * 256];
+static uint8_t msBiomeCacheValid[256 * 256];
 
 int msLookupBiome(Generator *g, int px, int pz) {
-    uint32_t h = ((uint32_t)px * 2654435761u) ^ ((uint32_t)pz * 668265263u)
-               ^ (uint32_t)g->seed ^ (uint32_t)(g->seed >> 32);
-    uint32_t i = h & ((1 << MS_BIOME_BITS) - 1);
+    uint32_t i = (px & 255) | ((pz & 255) << 8);
     if (msBiomeCacheValid[i] && msBiomeCacheSeed[i] == g->seed &&
         msBiomeCachePx[i] == px && msBiomeCachePz[i] == pz)
         return msBiomeCacheId[i];
