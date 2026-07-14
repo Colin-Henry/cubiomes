@@ -2449,8 +2449,8 @@ static int chwNaturalWaterAt(CarveHasWaterCtx *hw, int lx, int y, int lz) {
         int z = (hw->chunkZ << 4) + lz;
         // cheap worst-case bound for this exact query; only pay for the
         // full density column once a query survives the bound
-        extern int msCouldBeNaturalWater(Generator *g, int x, int y, int z);
-        if (!msCouldBeNaturalWater((Generator*)hw->g, x, y, z))
+        extern int couldBeNaturalWater(Generator *g, int x, int y, int z);
+        if (!couldBeNaturalWater((Generator*)hw->g, x, y, z))
             return 0;
         double dens[2][2][20];
         chwComputeColumnDens(hw->g, hw->sn, x, z, dens);

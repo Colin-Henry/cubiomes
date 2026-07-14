@@ -29,11 +29,8 @@ static inline Piece* hasCollision(MineshaftPieceEnv *env, Pos3 b0, Pos3 b1) {
 
 static void extendMineshaftPiece(MineshaftPieceEnv *env, Piece *piece);
 
-// entrance boxes the start room carves into its walls (java childEntranceBoxes);
-// recorded during piece generation, consumed by the room's block placement
-#define MS_MAX_ENTRANCES 64
-static Pos3 msEnt0[MS_MAX_ENTRANCES], msEnt1[MS_MAX_ENTRANCES];
-static int msEntN;
+Pos3 entrance1[64], entrance2[64];
+int entranceCount;
 
 static void extendMineshaft(MineshaftPieceEnv *env, int x, int y, int z, int facing, int depth) {
     if (depth > 8) {
@@ -261,11 +258,11 @@ static void extendMineshaftPiece(MineshaftPieceEnv *env, Piece *piece) {
             }
             before = *env->n;
             extendMineshaft(env, piece->bb0.x + pos, piece->bb0.y + nextInt(env->rng, heightSpace) + 1, piece->bb0.z - 1, 0, piece->depth);
-            if (*env->n > before && msEntN < MS_MAX_ENTRANCES) {
+            if (*env->n > before && entranceCount < 64) {
                 c = env->list + before;
-                msEnt0[msEntN] = (Pos3) {c->bb0.x, c->bb0.y, rb0.z};
-                msEnt1[msEntN] = (Pos3) {c->bb1.x, c->bb1.y, rb0.z + 1};
-                msEntN++;
+                entrance1[entranceCount] = (Pos3) {c->bb0.x, c->bb0.y, rb0.z};
+                entrance2[entranceCount] = (Pos3) {c->bb1.x, c->bb1.y, rb0.z + 1};
+                entranceCount++;
             }
         }
 
@@ -276,11 +273,11 @@ static void extendMineshaftPiece(MineshaftPieceEnv *env, Piece *piece) {
             }
             before = *env->n;
             extendMineshaft(env, piece->bb0.x + pos, piece->bb0.y + nextInt(env->rng, heightSpace) + 1, piece->bb1.z + 1, 2, piece->depth);
-            if (*env->n > before && msEntN < MS_MAX_ENTRANCES) {
+            if (*env->n > before && entranceCount < 64) {
                 c = env->list + before;
-                msEnt0[msEntN] = (Pos3) {c->bb0.x, c->bb0.y, rb1.z - 1};
-                msEnt1[msEntN] = (Pos3) {c->bb1.x, c->bb1.y, rb1.z};
-                msEntN++;
+                entrance1[entranceCount] = (Pos3) {c->bb0.x, c->bb0.y, rb1.z - 1};
+                entrance2[entranceCount] = (Pos3) {c->bb1.x, c->bb1.y, rb1.z};
+                entranceCount++;
             }
         }
 
@@ -292,11 +289,11 @@ static void extendMineshaftPiece(MineshaftPieceEnv *env, Piece *piece) {
             }
             before = *env->n;
             extendMineshaft(env, piece->bb0.x - 1, piece->bb0.y + nextInt(env->rng, heightSpace) + 1, piece->bb0.z + pos, 3, piece->depth);
-            if (*env->n > before && msEntN < MS_MAX_ENTRANCES) {
+            if (*env->n > before && entranceCount < 64) {
                 c = env->list + before;
-                msEnt0[msEntN] = (Pos3) {rb0.x, c->bb0.y, c->bb0.z};
-                msEnt1[msEntN] = (Pos3) {rb0.x + 1, c->bb1.y, c->bb1.z};
-                msEntN++;
+                entrance1[entranceCount] = (Pos3) {rb0.x, c->bb0.y, c->bb0.z};
+                entrance2[entranceCount] = (Pos3) {rb0.x + 1, c->bb1.y, c->bb1.z};
+                entranceCount++;
             }
         }
 
@@ -307,11 +304,11 @@ static void extendMineshaftPiece(MineshaftPieceEnv *env, Piece *piece) {
             }
             before = *env->n;
             extendMineshaft(env, piece->bb1.x + 1, piece->bb0.y + nextInt(env->rng, heightSpace) + 1, piece->bb0.z + pos, 1, piece->depth);
-            if (*env->n > before && msEntN < MS_MAX_ENTRANCES) {
+            if (*env->n > before && entranceCount < 64) {
                 c = env->list + before;
-                msEnt0[msEntN] = (Pos3) {rb1.x - 1, c->bb0.y, c->bb0.z};
-                msEnt1[msEntN] = (Pos3) {rb1.x, c->bb1.y, c->bb1.z};
-                msEntN++;
+                entrance1[entranceCount] = (Pos3) {rb1.x - 1, c->bb0.y, c->bb0.z};
+                entrance2[entranceCount] = (Pos3) {rb1.x, c->bb1.y, c->bb1.z};
+                entranceCount++;
             }
         }
         break;
@@ -345,7 +342,7 @@ int getMineshaftPieces(Generator *g, Piece *list, int n, int mc, uint64_t seed, 
     uint64_t rng = chunkGenerateRnd(seed, chunkX, chunkZ);
     if (mc >= MC_1_18) nextDouble(&rng);
 
-    msEntN = 0;
+    entranceCount = 0;
     int count = 1;
 
     MineshaftPieceEnv env;
@@ -406,54 +403,48 @@ int getMineshaftPieces(Generator *g, Piece *list, int n, int mc, uint64_t seed, 
         p->bb0.y += vertShift;
         p->bb1.y += vertShift;
     }
-    for (int i = 0; i < msEntN; ++i) {
-        msEnt0[i].y += vertShift;
-        msEnt1[i].y += vertShift;
+    for (int i = 0; i < entranceCount; ++i) {
+        entrance1[i].y += vertShift;
+        entrance2[i].y += vertShift;
     }
 
     return count;
 }
 
-// chunk-local block masks built from the carver lists; 16x16x256 bits each
-STRUCT(MsChunkMask) {
+STRUCT(chunkMask) {
     uint8_t air[8192];
     uint8_t water[8192];
     int cx, cz;
-    // lazy per-column OCEAN_FLOOR_WG heightmap (top motion-blocking block)
-    int16_t topH[256];
-    uint8_t topHValid[256];
-    // blocks placed before/during this chunk's structure pass (lakes, then
-    // structure pieces in generation order); 4 bits per block:
-    // 0 untouched, 1 air, 2 full solid (planks/dirt/spawner),
-    // 3 non-air non-full (fence/rail/torch/cobweb), 4 water, 5 lava
-    uint8_t ovl[32768];
+    int16_t topBlock[256];
+    uint8_t topBlockValid[256];
+    uint8_t details[32768];
 };
 
-#define MS_OVL_NONE  0
-#define MS_OVL_AIR   1
-#define MS_OVL_SOLID 2
-#define MS_OVL_DECOR 3
-#define MS_OVL_WATER 4
-#define MS_OVL_LAVA  5
+#define DETAIL_NONE  0
+#define DETAIL_AIR   1
+#define DETAIL_SOLID 2
+#define DETAIL_DECOR 3
+#define DETAIL_WATER 4
+#define DETAIL_LAVA  5
 
-static inline void msOvlSet(MsChunkMask *cm, int x, int y, int z, int v) {
+static inline void setDetails(chunkMask *cm, int x, int y, int z, int v) {
     int lx = x - cm->cx, lz = z - cm->cz;
     if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || y < 0 || y > 255)
         return;
     int idx = (y << 8) | (lz << 4) | lx;
     int sh = (idx & 1) << 2;
-    cm->ovl[idx >> 1] = (cm->ovl[idx >> 1] & ~(0xF << sh)) | (v << sh);
+    cm->details[idx >> 1] = (cm->details[idx >> 1] & ~(0xF << sh)) | (v << sh);
 }
 
-static inline int msOvlGet(MsChunkMask *cm, int x, int y, int z) {
+static inline int getDetails(chunkMask *cm, int x, int y, int z) {
     int lx = x - cm->cx, lz = z - cm->cz;
     if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || y < 0 || y > 255)
-        return MS_OVL_NONE;
+        return DETAIL_NONE;
     int idx = (y << 8) | (lz << 4) | lx;
-    return (cm->ovl[idx >> 1] >> ((idx & 1) << 2)) & 0xF;
+    return (cm->details[idx >> 1] >> ((idx & 1) << 2)) & 0xF;
 }
 
-static void msFillMask(uint8_t *mask, Pos3List *list, int cx, int cz) {
+static void fillMask(uint8_t *mask, Pos3List *list, int cx, int cz) {
     memset(mask, 0, 8192);
     for (int i = 0; i < list->size; i++) {
         Pos3 a = list->pos3s[i];
@@ -465,7 +456,7 @@ static void msFillMask(uint8_t *mask, Pos3List *list, int cx, int cz) {
     }
 }
 
-static inline int msMaskGet(const uint8_t *mask, int cx, int cz, int x, int y, int z) {
+static inline int getMask(const uint8_t *mask, int cx, int cz, int x, int y, int z) {
     if (y < 0 || y > 255) return 0;
     int lx = x - cx, lz = z - cz;
     if (lx < 0 || lx > 15 || lz < 0 || lz > 15) return 0;
@@ -473,48 +464,44 @@ static inline int msMaskGet(const uint8_t *mask, int cx, int cz, int x, int y, i
     return (mask[idx >> 3] >> (idx & 7)) & 1;
 }
 
-// liquid classification matching java carvers:
-// - liquid-stage carvers win over air-stage carvers (they run later)
-// - water-carved blocks: y>10 water, y==10 magma/obsidian (solid), y<10 lava
-// - air-carved blocks: y>10 cave_air, y<=10 lava
-// - otherwise natural terrain: block-accurate water below sea level
-int msCouldBeNaturalWater(Generator *g, int x, int y, int z);
-static int msIsLiquid(Generator *g, SurfaceNoise *sn, MsChunkMask *cm, int x, int y, int z) {
-    int o = msOvlGet(cm, x, y, z);
-    if (o != MS_OVL_NONE) return o == MS_OVL_WATER || o == MS_OVL_LAVA;
-    if (msMaskGet(cm->water, cm->cx, cm->cz, x, y, z)) return y != 10;
-    if (msMaskGet(cm->air, cm->cx, cm->cz, x, y, z)) return y <= 10;
-    return msCouldBeNaturalWater(g, x, y, z) && isNaturalWater(g, sn, x, y, z);
+int couldBeNaturalWater(Generator *g, int x, int y, int z);
+
+static int isLiquid(Generator *g, SurfaceNoise *sn, chunkMask *cm, int x, int y, int z) {
+    int o = getDetails(cm, x, y, z);
+    if (o != DETAIL_NONE) return o == DETAIL_WATER || o == DETAIL_LAVA;
+    if (getMask(cm->water, cm->cx, cm->cz, x, y, z)) return y != 10;
+    if (getMask(cm->air, cm->cx, cm->cz, x, y, z)) return y <= 10;
+    return couldBeNaturalWater(g, x, y, z) && isNaturalWater(g, sn, x, y, z);
 }
 
-int touchesLiquid(Generator *g, SurfaceNoise *sn, MsChunkMask *cm, Piece *p) {
+int touchesLiquid(Generator *g, SurfaceNoise *sn, chunkMask *cm, Piece *p) {
     for (int x = p->bb0.x - 1; x <= p->bb1.x + 1; x++)
         for (int z = p->bb0.z - 1; z <= p->bb1.z + 1; z++)
-            if (msIsLiquid(g, sn, cm, x, p->bb0.y - 1, z) || msIsLiquid(g, sn, cm, x, p->bb1.y + 1, z))
+            if (isLiquid(g, sn, cm, x, p->bb0.y - 1, z) || isLiquid(g, sn, cm, x, p->bb1.y + 1, z))
                 return 1;
     for (int x = p->bb0.x - 1; x <= p->bb1.x + 1; x++)
         for (int y = p->bb0.y - 1; y <= p->bb1.y + 1; y++)
-            if (msIsLiquid(g, sn, cm, x, y, p->bb0.z - 1) || msIsLiquid(g, sn, cm, x, y, p->bb1.z + 1))
+            if (isLiquid(g, sn, cm, x, y, p->bb0.z - 1) || isLiquid(g, sn, cm, x, y, p->bb1.z + 1))
                 return 1;
     for (int z = p->bb0.z - 1; z <= p->bb1.z + 1; z++)
         for (int y = p->bb0.y - 1; y <= p->bb1.y + 1; y++)
-            if (msIsLiquid(g, sn, cm, p->bb0.x - 1, y, z) || msIsLiquid(g, sn, cm, p->bb1.x + 1, y, z))
+            if (isLiquid(g, sn, cm, p->bb0.x - 1, y, z) || isLiquid(g, sn, cm, p->bb1.x + 1, y, z))
                 return 1;
     return 0;
 }
 
-static int msTopSolid(Generator *g, const SurfaceNoise *sn, MsChunkMask *cm, int x, int z);
-int msCouldBeNaturalWater(Generator *g, int x, int y, int z);
+static int msTopSolid(Generator *g, const SurfaceNoise *sn, chunkMask *cm, int x, int z);
+int couldBeNaturalWater(Generator *g, int x, int y, int z);
 
 // "is the block air" in java terms: overlay from earlier pieces wins, then
 // liquid-carved blocks are never air (water/lava/magma), air-carved blocks
 // are air only above the lava level, and natural air sits above the terrain
 // top from sea level up
-static int msIsAirBlock(Generator *g, const SurfaceNoise *sn, MsChunkMask *cm, int x, int y, int z) {
-    int o = msOvlGet(cm, x, y, z);
-    if (o != MS_OVL_NONE) return o == MS_OVL_AIR;
-    if (msMaskGet(cm->water, cm->cx, cm->cz, x, y, z)) return 0;
-    if (msMaskGet(cm->air, cm->cx, cm->cz, x, y, z)) return y >= 11;
+static int msIsAirBlock(Generator *g, const SurfaceNoise *sn, chunkMask *cm, int x, int y, int z) {
+    int o = getDetails(cm, x, y, z);
+    if (o != DETAIL_NONE) return o == DETAIL_AIR;
+    if (getMask(cm->water, cm->cx, cm->cz, x, y, z)) return 0;
+    if (getMask(cm->air, cm->cx, cm->cz, x, y, z)) return y >= 11;
     if (y >= 63 && y > msTopSolid(g, sn, cm, x, z)) return 1;
     return 0;
 }
@@ -526,7 +513,7 @@ static inline double msLerp(double part, double from, double to) {
 // per-corner cell densities for one block column, same math as isNaturalWater
 // in generator.c but for the full y range so terrain height can be derived
 #define MS_DENS_CELLS 20
-static void msComputeColumnDens(Generator *g, const SurfaceNoise *sn, int x, int z,
+static void computeColumnDensity(Generator *g, const SurfaceNoise *sn, int x, int z,
                                 double dens[2][2][MS_DENS_CELLS]) {
     int px = x >> 2, pz = z >> 2;
     for (int dx = 0; dx <= 1; dx++)
@@ -549,36 +536,36 @@ static inline double msColDensAt(const double dens[2][2][MS_DENS_CELLS], int x, 
 // OCEAN_FLOOR_WG heightmap value minus one: the y of the highest
 // motion-blocking block after terrain + carvers (water/lava don't block,
 // magma from underwater carvers at y==10 does)
-static int msTopSolid(Generator *g, const SurfaceNoise *sn, MsChunkMask *cm, int x, int z) {
+static int msTopSolid(Generator *g, const SurfaceNoise *sn, chunkMask *cm, int x, int z) {
     int li = ((z - cm->cz) << 4) | (x - cm->cx);
-    if (cm->topHValid[li]) return cm->topH[li];
+    if (cm->topBlockValid[li]) return cm->topBlock[li];
 
     double dens[2][2][MS_DENS_CELLS];
-    msComputeColumnDens(g, sn, x, z, dens);
+    computeColumnDensity(g, sn, x, z, dens);
 
     int top = 0;
     for (int y = MS_DENS_CELLS * 8 - 9; y > 0; y--) {
-        int o = msOvlGet(cm, x, y, z);
-        if (o != MS_OVL_NONE) {
-            if (o == MS_OVL_SOLID) { top = y; break; }
+        int o = getDetails(cm, x, y, z);
+        if (o != DETAIL_NONE) {
+            if (o == DETAIL_SOLID) { top = y; break; }
             continue;
         }
-        if (msMaskGet(cm->water, cm->cx, cm->cz, x, y, z)) {
+        if (getMask(cm->water, cm->cx, cm->cz, x, y, z)) {
             if (y == 10) { top = y; break; }
             continue;
         }
-        if (msMaskGet(cm->air, cm->cx, cm->cz, x, y, z))
+        if (getMask(cm->air, cm->cx, cm->cz, x, y, z))
             continue;
         if (msColDensAt(dens, x, z, y) > 0) { top = y; break; }
     }
-    cm->topH[li] = (int16_t)top;
-    cm->topHValid[li] = 1;
+    cm->topBlock[li] = (int16_t)top;
+    cm->topBlockValid[li] = 1;
     return top;
 }
 
 // java StructurePiece.isInterior: block above (world y) must be strictly
 // below the OCEAN_FLOOR_WG heightmap, i.e. <= the top solid block
-static inline int msIsInterior(Generator *g, const SurfaceNoise *sn, MsChunkMask *cm,
+static inline int msIsInterior(Generator *g, const SurfaceNoise *sn, chunkMask *cm,
                                int x, int yAbove, int z) {
     return yAbove <= msTopSolid(g, sn, cm, x, z);
 }
@@ -589,23 +576,23 @@ static inline int msIsInterior(Generator *g, const SurfaceNoise *sn, MsChunkMask
 // into this chunk if those chunks were decorated earlier
 
 // block kind for the lake sim: 0 air, 1 solid, 2 water, 3 lava
-static int msLakeBlockKind(Generator *g, const SurfaceNoise *sn, MsChunkMask *tgt,
-                           MsChunkMask *src, int x, int y, int z) {
+static int msLakeBlockKind(Generator *g, const SurfaceNoise *sn, chunkMask *tgt,
+                           chunkMask *src, int x, int y, int z) {
     if (y < 0) return 1;
     if (y > 255) return 0;
     int inTgt = (x >= tgt->cx && x < tgt->cx + 16 && z >= tgt->cz && z < tgt->cz + 16);
     if (inTgt) {
-        int o = msOvlGet(tgt, x, y, z);
-        if (o == MS_OVL_AIR) return 0;
-        if (o == MS_OVL_SOLID || o == MS_OVL_DECOR) return 1;
-        if (o == MS_OVL_WATER) return 2;
-        if (o == MS_OVL_LAVA) return 3;
+        int o = getDetails(tgt, x, y, z);
+        if (o == DETAIL_AIR) return 0;
+        if (o == DETAIL_SOLID || o == DETAIL_DECOR) return 1;
+        if (o == DETAIL_WATER) return 2;
+        if (o == DETAIL_LAVA) return 3;
     }
-    MsChunkMask *m = inTgt ? tgt : src;
+    chunkMask *m = inTgt ? tgt : src;
     if (m && x >= m->cx && x < m->cx + 16 && z >= m->cz && z < m->cz + 16) {
-        if (msMaskGet(m->water, m->cx, m->cz, x, y, z))
+        if (getMask(m->water, m->cx, m->cz, x, y, z))
             return y == 10 ? 1 : (y < 10 ? 3 : 2);
-        if (msMaskGet(m->air, m->cx, m->cz, x, y, z))
+        if (getMask(m->air, m->cx, m->cz, x, y, z))
             return y >= 11 ? 0 : 3;
     }
     // natural terrain (small per-column cache)
@@ -617,7 +604,7 @@ static int msLakeBlockKind(Generator *g, const SurfaceNoise *sn, MsChunkMask *tg
             if (cValid[i] && cSeed[i] == g->seed && cX[i] == x && cZ[i] == z) { slot = i; break; }
         if (slot < 0) {
             slot = cNext; cNext = (cNext + 1) % 4;
-            msComputeColumnDens(g, sn, x, z, cDens[slot]);
+            computeColumnDensity(g, sn, x, z, cDens[slot]);
             cSeed[slot] = g->seed; cX[slot] = x; cZ[slot] = z; cValid[slot] = 1;
         }
         if (y >= MS_DENS_CELLS * 8 - 8) return y < 63 ? 2 : 0;
@@ -628,7 +615,7 @@ static int msLakeBlockKind(Generator *g, const SurfaceNoise *sn, MsChunkMask *tg
 
 // simulate the two lake features of source chunk (scx16,scz16 block base) and
 // write any blob blocks landing in the target chunk into its overlay
-static void msSimLakesInto(Generator *g, SurfaceNoise *sn, MsChunkMask *tgt, MsChunkMask *src,
+static void msSimLakesInto(Generator *g, SurfaceNoise *sn, chunkMask *tgt, chunkMask *src,
                            int mc, uint64_t seed, int scx16, int scz16) {
     int biome = getBiomeAt(g, 4, ((scx16 >> 4) << 2) + 2, 2, ((scz16 >> 4) << 2) + 2);
     int waterIdx = 0, lavaIdx = 1;
@@ -702,8 +689,8 @@ static void msSimLakesInto(Generator *g, SurfaceNoise *sn, MsChunkMask *tgt, MsC
         for (int s2 = 0; s2 < 16; s2++)
         for (int t = 0; t < 8; t++)
             if (bls[(j*16 + s2)*8 + t])
-                msOvlSet(tgt, ox + j, oy + t, oz + s2,
-                         t >= 4 ? MS_OVL_AIR : (isLava ? MS_OVL_LAVA : MS_OVL_WATER));
+                setDetails(tgt, ox + j, oy + t, oz + s2,
+                         t >= 4 ? DETAIL_AIR : (isLava ? DETAIL_LAVA : DETAIL_WATER));
     }
 }
 
@@ -714,7 +701,7 @@ STRUCT(MsCarverCache) {
     int valid;
 };
 
-static void msGetCarvers(Generator *g, SurfaceNoise *sn, MsCarverCache *cc, int cx16, int cz16) {
+static void carveChunk(Generator *g, SurfaceNoise *sn, MsCarverCache *cc, int cx16, int cz16) {
     if (!cc->valid) {
         createPos3List(&cc->air, 1);
         createPos3List(&cc->water, 1);
@@ -723,7 +710,7 @@ static void msGetCarvers(Generator *g, SurfaceNoise *sn, MsCarverCache *cc, int 
     }
 }
 
-static void msApplyLakes(Generator *g, SurfaceNoise *sn, MsChunkMask *tgt, int mc, uint64_t seed,
+static void applyLakes(Generator *g, SurfaceNoise *sn, chunkMask *tgt, int mc, uint64_t seed,
                          int *chunkXs, int *chunkZs, int nchunks, int ci, MsCarverCache *carverCache) {
     // sources whose blob (origin+15) can reach this chunk: itself, W, N, NW --
     // but a neighbor's lake only exists if that chunk was decorated earlier
@@ -756,20 +743,20 @@ static void msApplyLakes(Generator *g, SurfaceNoise *sn, MsChunkMask *tgt, int m
         if (candX[c] == tgt->cx && candZ[c] == tgt->cz) {
             msSimLakesInto(g, sn, tgt, tgt, mc, seed, candX[c], candZ[c]);
         } else {
-            MsChunkMask *src = (MsChunkMask*)malloc(sizeof(MsChunkMask));
+            chunkMask *src = (chunkMask*)malloc(sizeof(chunkMask));
             src->cx = candX[c];
             src->cz = candZ[c];
             MsCarverCache *cc = &carverCache[candIdx[c]];
-            msGetCarvers(g, sn, cc, candX[c], candZ[c]);
-            msFillMask(src->air, &cc->air, candX[c], candZ[c]);
-            msFillMask(src->water, &cc->water, candX[c], candZ[c]);
+            carveChunk(g, sn, cc, candX[c], candZ[c]);
+            fillMask(src->air, &cc->air, candX[c], candZ[c]);
+            fillMask(src->water, &cc->water, candX[c], candZ[c]);
             msSimLakesInto(g, sn, tgt, src, mc, seed, candX[c], candZ[c]);
             free(src);
         }
     }
 }
 
-static int isSupportingBox(Generator *g, const SurfaceNoise *sn, Piece *p, int x0, int x1, int z0, MsChunkMask *cm) {
+static int isSupportingBox(Generator *g, const SurfaceNoise *sn, Piece *p, int x0, int x1, int z0, chunkMask *cm) {
     int ceilY = p->bb0.y + 3;
     for (int x = x0; x <= x1; x++) {
         int tx = x, tz = z0;
@@ -785,42 +772,42 @@ static int isSupportingBox(Generator *g, const SurfaceNoise *sn, Piece *p, int x
 }
 
 // mark a piece-local block in the overlay if it lands in the current chunk
-static void msOvlSetLocal(MsChunkMask *cm, Piece *p, int x, int y, int z, int v) {
+static void msOvlSetLocal(chunkMask *cm, Piece *p, int x, int y, int z, int v) {
     rotPos(p->bb0, p->bb1, &x, &z, p->rot);
-    msOvlSet(cm, x, p->bb0.y + y, z, v);
+    setDetails(cm, x, p->bb0.y + y, z, v);
 }
 
 static void placeSupport(Generator *g, const SurfaceNoise *sn, Piece *p, int x0, int z, int x1,
-                         RandomSource rnd, MsChunkMask *cm) {
+                         RandomSource rnd, chunkMask *cm) {
     int sup = isSupportingBox(g, sn, p, x0, x1, z, cm);
     if (sup) {
         for (int yy = 0; yy <= 1; yy++) {
-            msOvlSetLocal(cm, p, x0, yy, z, MS_OVL_DECOR);   // fence columns
-            msOvlSetLocal(cm, p, x1, yy, z, MS_OVL_DECOR);
+            msOvlSetLocal(cm, p, x0, yy, z, DETAIL_DECOR);   // fence columns
+            msOvlSetLocal(cm, p, x1, yy, z, DETAIL_DECOR);
         }
         if (rnd.nextInt(rnd.state, 4) == 0) {
-            msOvlSetLocal(cm, p, x0, 2, z, MS_OVL_SOLID);    // plank caps
-            msOvlSetLocal(cm, p, x1, 2, z, MS_OVL_SOLID);
+            msOvlSetLocal(cm, p, x0, 2, z, DETAIL_SOLID);    // plank caps
+            msOvlSetLocal(cm, p, x1, 2, z, DETAIL_SOLID);
         } else {
             for (int xx = x0; xx <= x1; xx++)
-                msOvlSetLocal(cm, p, xx, 2, z, MS_OVL_SOLID); // plank beam
+                msOvlSetLocal(cm, p, xx, 2, z, DETAIL_SOLID); // plank beam
             if (rnd.nextFloat(rnd.state) < 0.05f)
-                msOvlSetLocal(cm, p, x0 + 1, 2, z - 1, MS_OVL_DECOR); // torch
+                msOvlSetLocal(cm, p, x0 + 1, 2, z - 1, DETAIL_DECOR); // torch
             if (rnd.nextFloat(rnd.state) < 0.05f)
-                msOvlSetLocal(cm, p, x0 + 1, 2, z + 1, MS_OVL_DECOR); // torch
+                msOvlSetLocal(cm, p, x0 + 1, 2, z + 1, DETAIL_DECOR); // torch
         }
     }
 }
 
 // java placeCobWeb: the roll itself is gated on isInterior (heightmap check
 // on the block above, world y = bb0.y + 3 for the corridor cobwebs at local y=2)
-static void maybePlaceCobWeb(Generator *g, const SurfaceNoise *sn, MsChunkMask *cm, Piece *p, RandomSource rnd, float chance, int x, int z) {
+static void maybePlaceCobWeb(Generator *g, const SurfaceNoise *sn, chunkMask *cm, Piece *p, RandomSource rnd, float chance, int x, int z) {
     int tx = x, tz = z;
     rotPos(p->bb0, p->bb1, &tx, &tz, p->rot);
     if (tx >= cm->cx && tx < cm->cx + 16 && tz >= cm->cz && tz < cm->cz + 16 &&
         msIsInterior(g, sn, cm, tx, p->bb0.y + 3, tz)) {
         if (rnd.nextFloat(rnd.state) < chance)
-            msOvlSet(cm, tx, p->bb0.y + 2, tz, MS_OVL_DECOR);
+            setDetails(cm, tx, p->bb0.y + 2, tz, DETAIL_DECOR);
     }
 }
 
@@ -851,7 +838,7 @@ int msLookupBiome(Generator *g, int px, int pz) {
     return id;
 }
 
-int msCouldBeNaturalWater(Generator *g, int x, int y, int z) { // tried to optimize via preliminary check
+int couldBeNaturalWater(Generator *g, int x, int y, int z) { // tried to optimize via preliminary check
     if (y >= 63 || y < 0)
         return 0;
 
@@ -938,16 +925,16 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
         uint64_t populationSeed = getPopulationSeed(mc, seed, cx, cz);
         rnd.setSeed(rnd.state, populationSeed + ssconf.generationStep * 10000 + ssconf.decoratorIndex);
 
-        msGetCarvers(g, sn, &carverCache[ci], cx, cz);
+        carveChunk(g, sn, &carverCache[ci], cx, cz);
 
-        MsChunkMask cm;
+        chunkMask cm;
         cm.cx = cx;
         cm.cz = cz;
-        msFillMask(cm.air, &carverCache[ci].air, cx, cz);
-        msFillMask(cm.water, &carverCache[ci].water, cx, cz);
-        memset(cm.topHValid, 0, sizeof(cm.topHValid));
-        memset(cm.ovl, 0, sizeof(cm.ovl));
-        msApplyLakes(g, sn, &cm, mc, seed, chunkXs, chunkZs, nchunks, ci, carverCache);
+        fillMask(cm.air, &carverCache[ci].air, cx, cz);
+        fillMask(cm.water, &carverCache[ci].water, cx, cz);
+        memset(cm.topBlockValid, 0, sizeof(cm.topBlockValid));
+        memset(cm.details, 0, sizeof(cm.details));
+        applyLakes(g, sn, &cm, mc, seed, chunkXs, chunkZs, nchunks, ci, carverCache);
 
         for (int i = 0; i < count; ++i) {
             Piece *p = &list[i];
@@ -977,13 +964,13 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                     for (int yy = 0; yy <= 1; yy++)
                     for (int xx = 0; xx <= 2; xx++)
                     for (int zz = 0; zz <= length; zz++)
-                        msOvlSetLocal(&cm, p, xx, yy, zz, MS_OVL_AIR);
+                        msOvlSetLocal(&cm, p, xx, yy, zz, DETAIL_AIR);
 
                     // 0.8F cave-air box on the ceiling row (y=2), roll per cell
                     for (int xx = 0; xx <= 2; xx++)
                     for (int zz = 0; zz <= length; zz++) {
                         if (rnd.nextFloat(rnd.state) <= 0.8f)
-                            msOvlSetLocal(&cm, p, xx, 2, zz, MS_OVL_AIR);
+                            msOvlSetLocal(&cm, p, xx, 2, zz, DETAIL_AIR);
                     }
 
                     // spider corridors roll a 0.6F cobweb box over (0..2, 0..1, 0..length)
@@ -999,7 +986,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                             rotPos(p->bb0, p->bb1, &tx, &tz, p->rot);
                             if (tx >= cx && tx < cx + 16 && tz >= cz && tz < cz + 16 &&
                                 msIsInterior(g, sn, &cm, tx, p->bb0.y + yy + 1, tz)) {
-                                msOvlSet(&cm, tx, p->bb0.y + yy, tz, MS_OVL_DECOR);
+                                setDetails(&cm, tx, p->bb0.y + yy, tz, DETAIL_DECOR);
                             }
                         }
                     }
@@ -1033,7 +1020,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                                 p->lootTables[p->chestCount] = "abandoned_mineshaft";
                                 p->lootSeeds[p->chestCount] = rnd.nextLong(rnd.state);
                                 p->chestCount++;
-                                msOvlSet(&cm, chestPosX, p->bb0.y, chestPosZ, MS_OVL_DECOR); // rail under minecart
+                                setDetails(&cm, chestPosX, p->bb0.y, chestPosZ, DETAIL_DECOR); // rail under minecart
                             }
                         }
 
@@ -1047,7 +1034,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                             if (newX >= cx && newX < cx + 16 && newZ >= cz && newZ < cz + 16 &&
                                 msIsInterior(g, sn, &cm, newX, p->bb0.y + 1, newZ)) {
                                 p->additionalData |= 1 << 2;
-                                msOvlSet(&cm, newX, p->bb0.y, newZ, MS_OVL_SOLID); // spawner
+                                setDetails(&cm, newX, p->bb0.y, newZ, DETAIL_SOLID); // spawner
                             }
                         }
                     }
@@ -1060,7 +1047,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                         if (tx >= cx && tx < cx + 16 && tz >= cz && tz < cz + 16 &&
                             msIsAirBlock(g, sn, &cm, tx, p->bb0.y - 1, tz) &&
                             msIsInterior(g, sn, &cm, tx, p->bb0.y, tz)) {
-                            msOvlSet(&cm, tx, p->bb0.y - 1, tz, MS_OVL_SOLID);
+                            setDetails(&cm, tx, p->bb0.y - 1, tz, DETAIL_SOLID);
                         }
                     }
 
@@ -1072,14 +1059,14 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                             rotPos(p->bb0, p->bb1, &tx, &tz, p->rot);
                             if (tx >= cx && tx < cx + 16 && tz >= cz && tz < cz + 16) {
                                 int rolls;
-                                int fo = msOvlGet(&cm, tx, floorY, tz);
-                                if (fo != MS_OVL_NONE) {
-                                    rolls = (fo == MS_OVL_SOLID);
-                                } else if (msMaskGet(cm.water, cx, cz, tx, floorY, tz)) {
+                                int fo = getDetails(&cm, tx, floorY, tz);
+                                if (fo != DETAIL_NONE) {
+                                    rolls = (fo == DETAIL_SOLID);
+                                } else if (getMask(cm.water, cx, cz, tx, floorY, tz)) {
                                     rolls = (floorY == 10);  // magma is solid, water/lava not
-                                } else if (msMaskGet(cm.air, cx, cz, tx, floorY, tz)) {
+                                } else if (getMask(cm.air, cx, cz, tx, floorY, tz)) {
                                     rolls = 0;  // still air here means non-interior (no plank) or lava
-                                } else if (msCouldBeNaturalWater(g, tx, floorY, tz) &&
+                                } else if (couldBeNaturalWater(g, tx, floorY, tz) &&
                                            isNaturalWater(g, sn, tx, floorY, tz)) {
                                     rolls = 0;
                                 } else if (floorY >= 63 && floorY > msTopSolid(g, sn, &cm, tx, tz)) {
@@ -1091,7 +1078,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                                     float rv = rnd.nextFloat(rnd.state);
                                     float chance = msIsInterior(g, sn, &cm, tx, p->bb0.y + 1, tz) ? 0.7f : 0.9f;
                                     if (rv < chance)
-                                        msOvlSet(&cm, tx, p->bb0.y, tz, MS_OVL_DECOR); // rail
+                                        setDetails(&cm, tx, p->bb0.y, tz, DETAIL_DECOR); // rail
                                 }
                             }
                         }
@@ -1104,14 +1091,14 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                     int x1 = p->bb1.x, y1 = p->bb1.y, z1 = p->bb1.z;
                     int twoFloored = (y1 - y0 + 1) > 3;
                     if (twoFloored) {
-                        for (int x = x0+1; x <= x1-1; x++) for (int y = y0; y <= y0+2; y++) for (int z = z0; z <= z1; z++) msOvlSet(&cm, x, y, z, MS_OVL_AIR);
-                        for (int x = x0; x <= x1; x++) for (int y = y0; y <= y0+2; y++) for (int z = z0+1; z <= z1-1; z++) msOvlSet(&cm, x, y, z, MS_OVL_AIR);
-                        for (int x = x0+1; x <= x1-1; x++) for (int y = y1-2; y <= y1; y++) for (int z = z0; z <= z1; z++) msOvlSet(&cm, x, y, z, MS_OVL_AIR);
-                        for (int x = x0; x <= x1; x++) for (int y = y1-2; y <= y1; y++) for (int z = z0+1; z <= z1-1; z++) msOvlSet(&cm, x, y, z, MS_OVL_AIR);
-                        for (int x = x0+1; x <= x1-1; x++) for (int z = z0+1; z <= z1-1; z++) msOvlSet(&cm, x, y0+3, z, MS_OVL_AIR);
+                        for (int x = x0+1; x <= x1-1; x++) for (int y = y0; y <= y0+2; y++) for (int z = z0; z <= z1; z++) setDetails(&cm, x, y, z, DETAIL_AIR);
+                        for (int x = x0; x <= x1; x++) for (int y = y0; y <= y0+2; y++) for (int z = z0+1; z <= z1-1; z++) setDetails(&cm, x, y, z, DETAIL_AIR);
+                        for (int x = x0+1; x <= x1-1; x++) for (int y = y1-2; y <= y1; y++) for (int z = z0; z <= z1; z++) setDetails(&cm, x, y, z, DETAIL_AIR);
+                        for (int x = x0; x <= x1; x++) for (int y = y1-2; y <= y1; y++) for (int z = z0+1; z <= z1-1; z++) setDetails(&cm, x, y, z, DETAIL_AIR);
+                        for (int x = x0+1; x <= x1-1; x++) for (int z = z0+1; z <= z1-1; z++) setDetails(&cm, x, y0+3, z, DETAIL_AIR);
                     } else {
-                        for (int x = x0+1; x <= x1-1; x++) for (int y = y0; y <= y1; y++) for (int z = z0; z <= z1; z++) msOvlSet(&cm, x, y, z, MS_OVL_AIR);
-                        for (int x = x0; x <= x1; x++) for (int y = y0; y <= y1; y++) for (int z = z0+1; z <= z1-1; z++) msOvlSet(&cm, x, y, z, MS_OVL_AIR);
+                        for (int x = x0+1; x <= x1-1; x++) for (int y = y0; y <= y1; y++) for (int z = z0; z <= z1; z++) setDetails(&cm, x, y, z, DETAIL_AIR);
+                        for (int x = x0; x <= x1; x++) for (int y = y0; y <= y1; y++) for (int z = z0+1; z <= z1-1; z++) setDetails(&cm, x, y, z, DETAIL_AIR);
                     }
                     // support pillars: placed when the block above the crossing is not air
                     int pxs[4] = {x0+1, x0+1, x1-1, x1-1};
@@ -1121,7 +1108,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                         if (px >= cx && px < cx + 16 && pz >= cz && pz < cz + 16 &&
                             !msIsAirBlock(g, sn, &cm, px, y1 + 1, pz)) {
                             for (int y = y0; y <= y1; y++)
-                                msOvlSet(&cm, px, y, pz, MS_OVL_SOLID);
+                                setDetails(&cm, px, y, pz, DETAIL_SOLID);
                         }
                     }
                     // floor planks
@@ -1130,7 +1117,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                         if (x >= cx && x < cx + 16 && z >= cz && z < cz + 16 &&
                             msIsAirBlock(g, sn, &cm, x, y0 - 1, z) &&
                             msIsInterior(g, sn, &cm, x, y0, z)) {
-                            msOvlSet(&cm, x, y0 - 1, z, MS_OVL_SOLID);
+                            setDetails(&cm, x, y0 - 1, z, DETAIL_SOLID);
                         }
                     }
                     break;
@@ -1143,7 +1130,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                     for (int z = z0; z <= z1; z++) {
                         if (x >= cx && x < cx + 16 && z >= cz && z < cz + 16 &&
                             !msIsAirBlock(g, sn, &cm, x, y0, z)) {
-                            msOvlSet(&cm, x, y0, z, MS_OVL_SOLID);
+                            setDetails(&cm, x, y0, z, DETAIL_SOLID);
                         }
                     }
                     // interior air
@@ -1151,13 +1138,13 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                     for (int x = x0; x <= x1; x++)
                     for (int y = y0 + 1; y <= yTop; y++)
                     for (int z = z0; z <= z1; z++)
-                        msOvlSet(&cm, x, y, z, MS_OVL_AIR);
+                        setDetails(&cm, x, y, z, DETAIL_AIR);
                     // entrance cutouts recorded during piece generation
-                    for (int e = 0; e < msEntN; e++) {
-                        for (int x = msEnt0[e].x; x <= msEnt1[e].x; x++)
-                        for (int y = msEnt1[e].y - 2; y <= msEnt1[e].y; y++)
-                        for (int z = msEnt0[e].z; z <= msEnt1[e].z; z++)
-                            msOvlSet(&cm, x, y, z, MS_OVL_AIR);
+                    for (int e = 0; e < entranceCount; e++) {
+                        for (int x = entrance1[e].x; x <= entrance2[e].x; x++)
+                        for (int y = entrance2[e].y - 2; y <= entrance2[e].y; y++)
+                        for (int z = entrance1[e].z; z <= entrance2[e].z; z++)
+                            setDetails(&cm, x, y, z, DETAIL_AIR);
                     }
                     // upper half sphere of air
                     if (y0 + 4 <= y1) {
@@ -1170,7 +1157,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                                 for (int z = z0; z <= z1; z++) {
                                     float pp = (z - cj) / (fh * 0.5f);
                                     if (nn*nn + l*l + pp*pp <= 1.05f)
-                                        msOvlSet(&cm, x, y, z, MS_OVL_AIR);
+                                        setDetails(&cm, x, y, z, DETAIL_AIR);
                                 }
                             }
                         }
@@ -1181,17 +1168,17 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                     for (int yy = 5; yy <= 7; yy++)
                     for (int xx = 0; xx <= 2; xx++)
                     for (int zz = 0; zz <= 1; zz++)
-                        msOvlSetLocal(&cm, p, xx, yy, zz, MS_OVL_AIR);
+                        msOvlSetLocal(&cm, p, xx, yy, zz, DETAIL_AIR);
                     for (int yy = 0; yy <= 2; yy++)
                     for (int xx = 0; xx <= 2; xx++)
                     for (int zz = 7; zz <= 8; zz++)
-                        msOvlSetLocal(&cm, p, xx, yy, zz, MS_OVL_AIR);
+                        msOvlSetLocal(&cm, p, xx, yy, zz, DETAIL_AIR);
                     for (int st = 0; st < 5; st++) {
                         int yLo = 5 - st - (st < 4 ? 1 : 0);
                         int yHi = 7 - st;
                         for (int yy = yLo; yy <= yHi; yy++)
                         for (int xx = 0; xx <= 2; xx++)
-                            msOvlSetLocal(&cm, p, xx, yy, 2 + st, MS_OVL_AIR);
+                            msOvlSetLocal(&cm, p, xx, yy, 2 + st, DETAIL_AIR);
                     }
                     break;
                 }
