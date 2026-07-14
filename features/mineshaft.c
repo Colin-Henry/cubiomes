@@ -570,130 +570,6 @@ static inline int msIsInterior(Generator *g, const SurfaceNoise *sn, chunkMask *
     return yAbove <= msTopSolid(g, sn, cm, x, z);
 }
 
-// ---- lake features (java LakeFeature, decoration step LAKES=1) ----
-// water/lava lakes generate BEFORE structures (step 3) and their blocks are
-// what edgesLiquid & co. see; lakes from the W/N/NW neighbor chunks can spill
-// into this chunk if those chunks were decorated earlier
-
-// block kind for the lake sim: 0 air, 1 solid, 2 water, 3 lava
-static int msLakeBlockKind(Generator *g, const SurfaceNoise *sn, chunkMask *tgt,
-                           chunkMask *src, int x, int y, int z) {
-    if (y < 0) return 1;
-    if (y > 255) return 0;
-    int inTgt = (x >= tgt->cx && x < tgt->cx + 16 && z >= tgt->cz && z < tgt->cz + 16);
-    if (inTgt) {
-        int o = getDetails(tgt, x, y, z);
-        if (o == DETAIL_AIR) return 0;
-        if (o == DETAIL_SOLID || o == DETAIL_DECOR) return 1;
-        if (o == DETAIL_WATER) return 2;
-        if (o == DETAIL_LAVA) return 3;
-    }
-    chunkMask *m = inTgt ? tgt : src;
-    if (m && x >= m->cx && x < m->cx + 16 && z >= m->cz && z < m->cz + 16) {
-        if (getMask(m->water, m->cx, m->cz, x, y, z))
-            return y == 10 ? 1 : (y < 10 ? 3 : 2);
-        if (getMask(m->air, m->cx, m->cz, x, y, z))
-            return y >= 11 ? 0 : 3;
-    }
-    // natural terrain (small per-column cache)
-    {
-        static uint64_t cSeed[4]; static int cX[4], cZ[4], cValid[4], cNext;
-        static double cDens[4][2][2][MS_DENS_CELLS];
-        int slot = -1;
-        for (int i = 0; i < 4; i++)
-            if (cValid[i] && cSeed[i] == g->seed && cX[i] == x && cZ[i] == z) { slot = i; break; }
-        if (slot < 0) {
-            slot = cNext; cNext = (cNext + 1) % 4;
-            computeColumnDensity(g, sn, x, z, cDens[slot]);
-            cSeed[slot] = g->seed; cX[slot] = x; cZ[slot] = z; cValid[slot] = 1;
-        }
-        if (y >= MS_DENS_CELLS * 8 - 8) return y < 63 ? 2 : 0;
-        if (msColDensAt(cDens[slot], x, z, y) > 0) return 1;
-        return y < 63 ? 2 : 0;
-    }
-}
-
-// simulate the two lake features of source chunk (scx16,scz16 block base) and
-// write any blob blocks landing in the target chunk into its overlay
-static void msSimLakesInto(Generator *g, SurfaceNoise *sn, chunkMask *tgt, chunkMask *src,
-                           int mc, uint64_t seed, int scx16, int scz16) {
-    int biome = getBiomeAt(g, 4, ((scx16 >> 4) << 2) + 2, 2, ((scz16 >> 4) << 2) + 2);
-    int waterIdx = 0, lavaIdx = 1;
-    if (biome == desert || biome == desert_hills || biome == desert_lakes) {
-        waterIdx = -1; lavaIdx = 0;
-    }
-    uint64_t pop = getPopulationSeed(mc, seed, scx16, scz16);
-
-    for (int f = 0; f < 2; f++) {
-        int isLava = f;
-        int idx = isLava ? lavaIdx : waterIdx;
-        if (idx < 0) continue;
-        uint64_t r;
-        setSeed(&r, pop + 10000 * 1 + idx);
-        int ox, oz, oy;
-        if (!isLava) {
-            if (nextInt(&r, 4) != 0) continue;
-            ox = nextInt(&r, 16) + scx16;
-            oz = nextInt(&r, 16) + scz16;
-            oy = nextInt(&r, 256);
-        } else {
-            if (nextInt(&r, 8) != 0) continue;
-            ox = nextInt(&r, 16) + scx16;
-            oz = nextInt(&r, 16) + scz16;
-            oy = nextInt(&r, nextInt(&r, 248) + 8);
-            if (!(oy < 63 || nextInt(&r, 10) == 0)) continue;
-        }
-
-        // LakeFeature.place: descend through air
-        while (oy > 5 && msLakeBlockKind(g, sn, tgt, src, ox, oy, oz) == 0) oy--;
-        if (oy <= 4) continue;
-        oy -= 4;
-
-        char bls[2048];
-        memset(bls, 0, sizeof(bls));
-        int nb = nextInt(&r, 4) + 4;
-        for (int b = 0; b < nb; b++) {
-            double d  = nextDouble(&r) * 6.0 + 3.0;
-            double e  = nextDouble(&r) * 4.0 + 2.0;
-            double fw = nextDouble(&r) * 6.0 + 3.0;
-            double gx = nextDouble(&r) * (16.0 - d - 2.0) + 1.0 + d / 2.0;
-            double h  = nextDouble(&r) * (8.0 - e - 4.0) + 2.0 + e / 2.0;
-            double k  = nextDouble(&r) * (16.0 - fw - 2.0) + 1.0 + fw / 2.0;
-            for (int l = 1; l < 15; l++)
-            for (int m = 1; m < 15; m++)
-            for (int n = 1; n < 7; n++) {
-                double o = (l - gx) / (d / 2.0);
-                double p = (n - h) / (e / 2.0);
-                double q = (m - k) / (fw / 2.0);
-                if (o*o + p*p + q*q < 1.0)
-                    bls[(l*16 + m)*8 + n] = 1;
-            }
-        }
-
-        int ok = 1;
-        for (int j = 0; j < 16 && ok; j++)
-        for (int s2 = 0; s2 < 16 && ok; s2++)
-        for (int t = 0; t < 8 && ok; t++) {
-            int edge = !bls[(j*16 + s2)*8 + t] && (
-                (j < 15 && bls[((j+1)*16 + s2)*8 + t]) || (j > 0 && bls[((j-1)*16 + s2)*8 + t]) ||
-                (s2 < 15 && bls[(j*16 + s2 + 1)*8 + t]) || (s2 > 0 && bls[(j*16 + s2 - 1)*8 + t]) ||
-                (t < 7 && bls[(j*16 + s2)*8 + t + 1]) || (t > 0 && bls[(j*16 + s2)*8 + t - 1]));
-            if (!edge) continue;
-            int kind = msLakeBlockKind(g, sn, tgt, src, ox + j, oy + t, oz + s2);
-            if (t >= 4 && (kind == 2 || kind == 3)) ok = 0;
-            else if (t < 4 && kind != 1 && kind != (isLava ? 3 : 2)) ok = 0;
-        }
-        if (!ok) continue;
-
-        for (int j = 0; j < 16; j++)
-        for (int s2 = 0; s2 < 16; s2++)
-        for (int t = 0; t < 8; t++)
-            if (bls[(j*16 + s2)*8 + t])
-                setDetails(tgt, ox + j, oy + t, oz + s2,
-                         t >= 4 ? DETAIL_AIR : (isLava ? DETAIL_LAVA : DETAIL_WATER));
-    }
-}
-
 // per-structure cache of applyAllCarvers results: every chunk in the pass
 // list gets carved once and reused (main pass + up to 4 lake-neighbor uses)
 STRUCT(MsCarverCache) {
@@ -710,50 +586,50 @@ static void carveChunk(Generator *g, SurfaceNoise *sn, MsCarverCache *cc, int cx
     }
 }
 
+// lakes (java LakeFeature, decoration step LAKES=1) generate BEFORE structures
+// (step 3) and their blocks are what edgesLiquid & co. see. The simulation
+// itself lives in finders.c (applyAllLakes); this wrapper supplies the
+// decoration order of the NW/W/N/self chunks from the structure's chunk list
+// plus the cached carver results, then writes the resulting lake blocks into
+// the chunk's details overlay.
 static void applyLakes(Generator *g, SurfaceNoise *sn, chunkMask *tgt, int mc, uint64_t seed,
                          int *chunkXs, int *chunkZs, int nchunks, int ci, MsCarverCache *carverCache) {
-    // sources whose blob (origin+15) can reach this chunk: itself, W, N, NW --
-    // but a neighbor's lake only exists if that chunk was decorated earlier
-    int candX[4], candZ[4], candIdx[4];
-    int nc = 0;
-    static const int offs[4][2] = {{-16,-16},{-16,0},{0,-16},{0,0}};
+    static const int offs[4][2] = {{-16,-16},{-16,0},{0,-16},{0,0}}; // NW, W, N, self
+    int order[4];
+    Pos3List *ca[4], *cw[4];
     for (int c = 0; c < 4; c++) {
+        order[c] = -1; ca[c] = NULL; cw[c] = NULL;
         int sx = tgt->cx + offs[c][0], sz = tgt->cz + offs[c][1];
-        int idx = -1;
-        if (sx == tgt->cx && sz == tgt->cz) {
+        int idx;
+        if (c == 3) {
             idx = ci; // own lakes always precede structures (step 1 < 3)
         } else {
+            idx = -1;
             for (int q = 0; q < nchunks; q++)
                 if (chunkXs[q] == sx && chunkZs[q] == sz) { idx = q; break; }
             if (idx < 0 || idx > ci) continue; // not decorated yet
         }
-        candX[nc] = sx; candZ[nc] = sz; candIdx[nc] = idx; nc++;
+        carveChunk(g, sn, &carverCache[idx], sx, sz);
+        order[c] = idx;
+        ca[c] = &carverCache[idx].air;
+        cw[c] = &carverCache[idx].water;
     }
-    // apply in decoration order
-    for (int a = 1; a < nc; a++) {
-        int kx = candX[a], kz = candZ[a], ki = candIdx[a];
-        int b = a - 1;
-        while (b >= 0 && candIdx[b] > ki) {
-            candX[b+1] = candX[b]; candZ[b+1] = candZ[b]; candIdx[b+1] = candIdx[b];
-            b--;
-        }
-        candX[b+1] = kx; candZ[b+1] = kz; candIdx[b+1] = ki;
-    }
-    for (int c = 0; c < nc; c++) {
-        if (candX[c] == tgt->cx && candZ[c] == tgt->cz) {
-            msSimLakesInto(g, sn, tgt, tgt, mc, seed, candX[c], candZ[c]);
-        } else {
-            chunkMask *src = (chunkMask*)malloc(sizeof(chunkMask));
-            src->cx = candX[c];
-            src->cz = candZ[c];
-            MsCarverCache *cc = &carverCache[candIdx[c]];
-            carveChunk(g, sn, cc, candX[c], candZ[c]);
-            fillMask(src->air, &cc->air, candX[c], candZ[c]);
-            fillMask(src->water, &cc->water, candX[c], candZ[c]);
-            msSimLakesInto(g, sn, tgt, src, mc, seed, candX[c], candZ[c]);
-            free(src);
-        }
-    }
+
+    Pos3List lakeAir, lakeWater, lakeLava;
+    createPos3List(&lakeAir, 1);
+    createPos3List(&lakeWater, 1);
+    createPos3List(&lakeLava, 1);
+    applyAllLakes(g, sn, mc, seed, tgt->cx >> 4, tgt->cz >> 4, order, ca, cw,
+                  &lakeAir, &lakeWater, &lakeLava);
+    for (int i = 0; i < lakeAir.size; i++)
+        setDetails(tgt, lakeAir.pos3s[i].x, lakeAir.pos3s[i].y, lakeAir.pos3s[i].z, DETAIL_AIR);
+    for (int i = 0; i < lakeWater.size; i++)
+        setDetails(tgt, lakeWater.pos3s[i].x, lakeWater.pos3s[i].y, lakeWater.pos3s[i].z, DETAIL_WATER);
+    for (int i = 0; i < lakeLava.size; i++)
+        setDetails(tgt, lakeLava.pos3s[i].x, lakeLava.pos3s[i].y, lakeLava.pos3s[i].z, DETAIL_LAVA);
+    freePos3List(&lakeAir);
+    freePos3List(&lakeWater);
+    freePos3List(&lakeLava);
 }
 
 static int isSupportingBox(Generator *g, const SurfaceNoise *sn, Piece *p, int x0, int x1, int z0, chunkMask *cm) {

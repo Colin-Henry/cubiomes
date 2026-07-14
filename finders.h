@@ -766,6 +766,18 @@ void carveCave(uint64_t seed, int mc, int chunkX, int chunkZ, CaveCarverConfig c
  */
 void applyAllCarvers(Generator *g, const SurfaceNoise *sn, int chunkX, int chunkZ, Pos3List* poses, Pos3List* waterPoses);
 
+/**
+ * Simulates lake features in the given chunk: its own water/lava lakes plus spill from the NW/W/N neighbor chunks
+ * Blocks are appended to lakeAir/lakeWater/lakeLava (world coordinates)
+ * @param order Used primarily for interal mineshaft code. Use {-1, -1, -1, 0} otherwise
+ * @param carvedAir Optional (pass NULL). airPoses from applyAllCarvers for NW/W/N/target chunks. 
+ * @param carvedWater same but waterPoses from applyAllCarvers. Also optional (pass NULL)
+ * @param lakeAir Pos3List of all lake air blocks
+ * @param lakeWater Pos3List of all lake water blocks
+ * @param lakeLava Pos3List of all lake lava blocks
+ */
+void applyAllLakes(Generator *g, const SurfaceNoise *sn, int mc, uint64_t seed, int chunkX, int chunkZ, const int order[4], Pos3List *carvedAir[4], Pos3List *carvedWater[4], Pos3List *lakeAir, Pos3List *lakeWater, Pos3List *lakeLava);
+
 //==============================================================================
 // Random providers
 //==============================================================================

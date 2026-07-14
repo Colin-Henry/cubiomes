@@ -2903,6 +2903,271 @@ void applyAllCarvers(Generator *g, const SurfaceNoise *sn, int chunkX, int chunk
 }
 
 //==============================================================================
+// Lake Features
+//==============================================================================
+
+static void lakeFillMask(uint8_t *mask, const Pos3List *list, int cx16, int cz16) {
+    memset(mask, 0, 8192);
+    for (int i = 0; i < list->size; i++) {
+        Pos3 a = list->pos3s[i];
+        int lx = a.x - cx16, lz = a.z - cz16;
+        if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || a.y < 0 || a.y > 255)
+            continue;
+        int idx = (a.y << 8) | (lz << 4) | lx;
+        mask[idx >> 3] |= 1 << (idx & 7);
+    }
+}
+
+static inline int lakeMaskGet(const uint8_t *mask, int cx16, int cz16, int x, int y, int z) {
+    if (y < 0 || y > 255) return 0;
+    int lx = x - cx16, lz = z - cz16;
+    if (lx < 0 || lx > 15 || lz < 0 || lz > 15) return 0;
+    int idx = (y << 8) | (lz << 4) | lx;
+    return (mask[idx >> 3] >> (idx & 7)) & 1;
+}
+
+static inline double lakeColDensAt(const double dens[2][2][20], int x, int z, int y) {
+    int py = y >> 3;
+    double fx = (x & 3) / 4.0, fy = (y & 7) / 8.0, fz = (z & 3) / 4.0;
+    double l00 = chwLerp(fy, dens[0][0][py], dens[0][0][py+1]);
+    double l10 = chwLerp(fy, dens[1][0][py], dens[1][0][py+1]);
+    double l01 = chwLerp(fy, dens[0][1][py], dens[0][1][py+1]);
+    double l11 = chwLerp(fy, dens[1][1][py], dens[1][1][py+1]);
+    double lx0 = chwLerp(fx, l00, l10);
+    double lx1 = chwLerp(fx, l01, l11);
+    return chwLerp(fz, lx0, lx1);
+}
+
+static int lakeBlockKind(const Generator *g, const SurfaceNoise *sn, int tgtCx16, int tgtCz16, const uint8_t *tgtAirM, const uint8_t *tgtWaterM, const uint8_t *acc, 
+                        int srcCx16, int srcCz16, const uint8_t *srcAirM, const uint8_t *srcWaterM, int x, int y, int z) {
+    if (y < 0) return 1;
+    if (y > 255) return 0;
+    int inTgt = (x >= tgtCx16 && x < tgtCx16 + 16 && z >= tgtCz16 && z < tgtCz16 + 16);
+    if (inTgt) {
+        int a = acc[(y << 8) | ((z - tgtCz16) << 4) | (x - tgtCx16)];
+        if (a == 1) return 0;
+        if (a == 2) return 2;
+        if (a == 3) return 3;
+    }
+    const uint8_t *ma = inTgt ? tgtAirM : srcAirM;
+    const uint8_t *mw = inTgt ? tgtWaterM : srcWaterM;
+    int mcx = inTgt ? tgtCx16 : srcCx16;
+    int mcz = inTgt ? tgtCz16 : srcCz16;
+    if (x >= mcx && x < mcx + 16 && z >= mcz && z < mcz + 16) {
+        if (lakeMaskGet(mw, mcx, mcz, x, y, z))
+            return y == 10 ? 1 : (y < 10 ? 3 : 2);
+        if (lakeMaskGet(ma, mcx, mcz, x, y, z))
+            return y >= 11 ? 0 : 3;
+    }
+    // natural terrain
+    {
+        static uint64_t cSeed[4]; static int cX[4], cZ[4], cValid[4], cNext;
+        static double cDens[4][2][2][20];
+        int slot = -1;
+        for (int i = 0; i < 4; i++)
+            if (cValid[i] && cSeed[i] == g->seed && cX[i] == x && cZ[i] == z) { slot = i; break; }
+        if (slot < 0) {
+            slot = cNext; cNext = (cNext + 1) % 4;
+            chwComputeColumnDens(g, sn, x, z, cDens[slot]);
+            cSeed[slot] = g->seed; cX[slot] = x; cZ[slot] = z; cValid[slot] = 1;
+        }
+        if (y >= 20 * 8 - 8) return y < 63 ? 2 : 0;
+        if (lakeColDensAt(cDens[slot], x, z, y) > 0) return 1;
+        return y < 63 ? 2 : 0;
+    }
+}
+
+static void lakeSimChunk(const Generator *g, const SurfaceNoise *sn, int mc, uint64_t seed, int tgtCx16, int tgtCz16, const uint8_t *tgtAirM, const uint8_t *tgtWaterM, uint8_t *acc, int scx16, int scz16, const uint8_t *srcAirM, const uint8_t *srcWaterM) {
+    int biome = getBiomeAt(g, 4, ((scx16 >> 4) << 2) + 2, 2, ((scz16 >> 4) << 2) + 2);
+    int waterIdx = 0, lavaIdx = 1;
+    if (biome == desert || biome == desert_hills || biome == desert_lakes) {
+        waterIdx = -1; lavaIdx = 0;
+    }
+    uint64_t pop = getPopulationSeed(mc, seed, scx16, scz16);
+
+    for (int f = 0; f < 2; f++) {
+        int isLava = f;
+        int idx = isLava ? lavaIdx : waterIdx;
+        if (idx < 0) continue;
+        uint64_t r;
+        setSeed(&r, pop + 10000 * 1 + idx);
+        int ox, oz, oy;
+        if (!isLava) {
+            if (nextInt(&r, 4) != 0) continue;
+            ox = nextInt(&r, 16) + scx16;
+            oz = nextInt(&r, 16) + scz16;
+            oy = nextInt(&r, 256);
+        } else {
+            if (nextInt(&r, 8) != 0) continue;
+            ox = nextInt(&r, 16) + scx16;
+            oz = nextInt(&r, 16) + scz16;
+            oy = nextInt(&r, nextInt(&r, 248) + 8);
+            if (!(oy < 63 || nextInt(&r, 10) == 0)) continue;
+        }
+
+        // LakeFeature.place: descend through air
+        while (oy > 5 && lakeBlockKind(g, sn, tgtCx16, tgtCz16, tgtAirM, tgtWaterM, acc,
+                                       scx16, scz16, srcAirM, srcWaterM, ox, oy, oz) == 0) oy--;
+        if (oy <= 4) continue;
+        oy -= 4;
+
+        char bls[2048];
+        memset(bls, 0, sizeof(bls));
+        int nb = nextInt(&r, 4) + 4;
+        for (int b = 0; b < nb; b++) {
+            double d  = nextDouble(&r) * 6.0 + 3.0;
+            double e  = nextDouble(&r) * 4.0 + 2.0;
+            double fw = nextDouble(&r) * 6.0 + 3.0;
+            double gx = nextDouble(&r) * (16.0 - d - 2.0) + 1.0 + d / 2.0;
+            double h  = nextDouble(&r) * (8.0 - e - 4.0) + 2.0 + e / 2.0;
+            double k  = nextDouble(&r) * (16.0 - fw - 2.0) + 1.0 + fw / 2.0;
+            for (int l = 1; l < 15; l++)
+            for (int m = 1; m < 15; m++)
+            for (int n = 1; n < 7; n++) {
+                double o = (l - gx) / (d / 2.0);
+                double p = (n - h) / (e / 2.0);
+                double q = (m - k) / (fw / 2.0);
+                if (o*o + p*p + q*q < 1.0)
+                    bls[(l*16 + m)*8 + n] = 1;
+            }
+        }
+
+        int ok = 1;
+        for (int j = 0; j < 16 && ok; j++)
+        for (int s2 = 0; s2 < 16 && ok; s2++)
+        for (int t = 0; t < 8 && ok; t++) {
+            int edge = !bls[(j*16 + s2)*8 + t] && (
+                (j < 15 && bls[((j+1)*16 + s2)*8 + t]) || (j > 0 && bls[((j-1)*16 + s2)*8 + t]) ||
+                (s2 < 15 && bls[(j*16 + s2 + 1)*8 + t]) || (s2 > 0 && bls[(j*16 + s2 - 1)*8 + t]) ||
+                (t < 7 && bls[(j*16 + s2)*8 + t + 1]) || (t > 0 && bls[(j*16 + s2)*8 + t - 1]));
+            if (!edge) continue;
+            int kind = lakeBlockKind(g, sn, tgtCx16, tgtCz16, tgtAirM, tgtWaterM, acc,
+                                     scx16, scz16, srcAirM, srcWaterM, ox + j, oy + t, oz + s2);
+            if (t >= 4 && (kind == 2 || kind == 3)) ok = 0;
+            else if (t < 4 && kind != 1 && kind != (isLava ? 3 : 2)) ok = 0;
+        }
+        if (!ok) continue;
+
+        for (int j = 0; j < 16; j++)
+        for (int s2 = 0; s2 < 16; s2++)
+        for (int t = 0; t < 8; t++) {
+            if (!bls[(j*16 + s2)*8 + t]) continue;
+            int wx = ox + j - tgtCx16, wy = oy + t, wz = oz + s2 - tgtCz16;
+            if (wx >= 0 && wx < 16 && wz >= 0 && wz < 16 && wy >= 0 && wy <= 255)
+                acc[(wy << 8) | (wz << 4) | wx] = t >= 4 ? 1 : (isLava ? 3 : 2);
+        }
+    }
+}
+
+static int lakeAttempts(const Generator *g, int mc, uint64_t seed, int scx16, int scz16) {
+    int biome = getBiomeAt(g, 4, ((scx16 >> 4) << 2) + 2, 2, ((scz16 >> 4) << 2) + 2);
+    int waterIdx = 0, lavaIdx = 1;
+    if (biome == desert || biome == desert_hills || biome == desert_lakes) {
+        waterIdx = -1; lavaIdx = 0;
+    }
+    uint64_t pop = getPopulationSeed(mc, seed, scx16, scz16);
+
+    if (waterIdx >= 0) {
+        uint64_t r;
+        setSeed(&r, pop + 10000 * 1 + waterIdx);
+        if (nextInt(&r, 4) == 0)
+            return 1;
+    }
+    
+    uint64_t r;
+    setSeed(&r, pop + 10000 * 1 + lavaIdx);
+    if (nextInt(&r, 8) == 0) {
+        nextInt(&r, 16);
+        nextInt(&r, 16);
+        int oy = nextInt(&r, nextInt(&r, 248) + 8);
+        if (oy < 63 || nextInt(&r, 10) == 0)
+            return 1;
+    }
+    
+    return 0;
+}
+
+void applyAllLakes(Generator *g, const SurfaceNoise *sn, int mc, uint64_t seed, int chunkX, int chunkZ, const int order[4], Pos3List *carvedAir[4], Pos3List *carvedWater[4],Pos3List *lakeAir, Pos3List *lakeWater, Pos3List *lakeLava) {
+    static const int coffs[4][2] = {{-1,-1},{-1,0},{0,-1},{0,0}}; // NW, W, N, self
+    const int tgtCx16 = chunkX << 4, tgtCz16 = chunkZ << 4;
+
+    int cand[4], nc = 0;
+    for (int c = 0; c < 4; c++) {
+        if (order[c] < 0) continue;
+        int b = nc - 1;
+        while (b >= 0 && order[cand[b]] > order[c]) { cand[b+1] = cand[b]; b--; }
+        cand[b+1] = c;
+        nc++;
+    }
+
+    {
+        int nc2 = 0;
+        for (int c = 0; c < nc; c++) {
+            int s = cand[c];
+            if (lakeAttempts(g, mc, seed, tgtCx16 + coffs[s][0] * 16, tgtCz16 + coffs[s][1] * 16)) cand[nc2++] = s;
+        }
+        nc = nc2;
+        if (nc == 0)
+            return;
+    }
+
+    Pos3List ownAir[4], ownWater[4];
+    Pos3List *ca[4], *cw[4];
+    int owned[4] = {0, 0, 0, 0};
+    int needed[4] = {0, 0, 0, 1};
+    for (int c = 0; c < nc; c++) needed[cand[c]] = 1;
+    for (int s = 0; s < 4; s++) {
+        ca[s] = NULL; cw[s] = NULL;
+        if (!needed[s]) continue;
+        if (carvedAir) ca[s] = carvedAir[s];
+        if (carvedWater) cw[s] = carvedWater[s];
+        if (!ca[s] || !cw[s]) {
+            createPos3List(&ownAir[s], 1);
+            createPos3List(&ownWater[s], 1);
+            applyAllCarvers(g, sn, chunkX + coffs[s][0], chunkZ + coffs[s][1], &ownAir[s], &ownWater[s]);
+            ca[s] = &ownAir[s];
+            cw[s] = &ownWater[s];
+            owned[s] = 1;
+        }
+    }
+
+    uint8_t tgtAirM[8192], tgtWaterM[8192], srcAirM[8192], srcWaterM[8192];
+    uint8_t acc[65536];
+    memset(acc, 0, sizeof(acc));
+    lakeFillMask(tgtAirM, ca[3], tgtCx16, tgtCz16);
+    lakeFillMask(tgtWaterM, cw[3], tgtCx16, tgtCz16);
+
+    for (int c = 0; c < nc; c++) {
+        int s = cand[c];
+        int scx16 = tgtCx16 + coffs[s][0] * 16;
+        int scz16 = tgtCz16 + coffs[s][1] * 16;
+        if (s == 3) {
+            lakeSimChunk(g, sn, mc, seed, tgtCx16, tgtCz16, tgtAirM, tgtWaterM, acc, scx16, scz16, tgtAirM, tgtWaterM);
+        } else {
+            lakeFillMask(srcAirM, ca[s], scx16, scz16);
+            lakeFillMask(srcWaterM, cw[s], scx16, scz16);
+            lakeSimChunk(g, sn, mc, seed, tgtCx16, tgtCz16, tgtAirM, tgtWaterM, acc, scx16, scz16, srcAirM, srcWaterM);
+        }
+    }
+
+    for (int y = 0; y < 256; y++)
+    for (int lz = 0; lz < 16; lz++)
+    for (int lx = 0; lx < 16; lx++) {
+        int v = acc[(y << 8) | (lz << 4) | lx];
+        if (v == 0) continue;
+        Pos3 p = {tgtCx16 + lx, y, tgtCz16 + lz};
+        appendPos3List(v == 1 ? lakeAir : v == 2 ? lakeWater : lakeLava, p);
+    }
+
+    for (int s = 0; s < 4; s++) {
+        if (owned[s]) {
+            freePos3List(&ownAir[s]);
+            freePos3List(&ownWater[s]);
+        }
+    }
+}
+
+//==============================================================================
 // Validating Structure Positions
 //==============================================================================
 
