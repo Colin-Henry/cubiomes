@@ -663,24 +663,24 @@ static void maybePlaceCobWeb(Generator *g, const SurfaceNoise *sn, chunkMask *cm
     }
 }
 
-static uint64_t msBiomeCacheSeed[256 * 256];
-static int msBiomeCachePx[256 * 256];
-static int msBiomeCachePz[256 * 256];
-static int msBiomeCacheId[256 * 256];
-static uint8_t msBiomeCacheValid[256 * 256];
+static uint64_t biomeCacheSeed[256 * 256];
+static int biomeCachePx[256 * 256];
+static int biomeCachePz[256 * 256];
+static int biomeCacheId[256 * 256];
+static uint8_t biomeCacheValid[256 * 256];
 
 int lookupBiome(Generator *g, int px, int pz) {
     uint32_t i = (px & 255) | ((pz & 255) << 8);
-    if (msBiomeCacheValid[i] && msBiomeCacheSeed[i] == g->seed &&
-        msBiomeCachePx[i] == px && msBiomeCachePz[i] == pz)
-        return msBiomeCacheId[i];
+    if (biomeCacheValid[i] && biomeCacheSeed[i] == g->seed &&
+        biomeCachePx[i] == px && biomeCachePz[i] == pz)
+        return biomeCacheId[i];
 
     int id = getBiomeAt(g, 4, px, 0, pz);
-    msBiomeCacheSeed[i] = g->seed;
-    msBiomeCachePx[i] = px;
-    msBiomeCachePz[i] = pz;
-    msBiomeCacheId[i] = id;
-    msBiomeCacheValid[i] = 1;
+    biomeCacheSeed[i] = g->seed;
+    biomeCachePx[i] = px;
+    biomeCachePz[i] = pz;
+    biomeCacheId[i] = id;
+    biomeCacheValid[i] = 1;
     return id;
 }
 
