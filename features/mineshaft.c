@@ -411,7 +411,7 @@ int getMineshaftPieces(Generator *g, Piece *list, int n, int mc, uint64_t seed, 
     return count;
 }
 
-STRUCT(chunkMask) {
+STRUCT(ChunkMask) {
     int cx, cz;
     uint8_t air[8192];
     uint8_t water[8192];
@@ -427,7 +427,7 @@ STRUCT(chunkMask) {
 #define DETAIL_WATER 4
 #define DETAIL_LAVA  5
 
-static inline void setDetails(chunkMask *cm, int x, int y, int z, int v) {
+static inline void setDetails(ChunkMask *cm, int x, int y, int z, int v) {
     int lx = x - cm->cx, lz = z - cm->cz;
     if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || y < 0 || y > 255)
         return;
@@ -436,7 +436,7 @@ static inline void setDetails(chunkMask *cm, int x, int y, int z, int v) {
     cm->details[idx >> 1] = (cm->details[idx >> 1] & ~(0xF << sh)) | (v << sh);
 }
 
-static inline int getDetails(chunkMask *cm, int x, int y, int z) {
+static inline int getDetails(ChunkMask *cm, int x, int y, int z) {
     int lx = x - cm->cx, lz = z - cm->cz;
     if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || y < 0 || y > 255)
         return DETAIL_NONE;
@@ -466,7 +466,7 @@ static inline int getMask(const uint8_t *mask, int cx, int cz, int x, int y, int
 
 int couldBeNaturalWater(Generator *g, int x, int y, int z);
 
-static int isLiquid(Generator *g, SurfaceNoise *sn, chunkMask *cm, int x, int y, int z) {
+static int isLiquid(Generator *g, SurfaceNoise *sn, ChunkMask *cm, int x, int y, int z) {
     int o = getDetails(cm, x, y, z);
     if (o != DETAIL_NONE) return o == DETAIL_WATER || o == DETAIL_LAVA;
     if (getMask(cm->water, cm->cx, cm->cz, x, y, z)) return y != 10;
@@ -474,7 +474,7 @@ static int isLiquid(Generator *g, SurfaceNoise *sn, chunkMask *cm, int x, int y,
     return couldBeNaturalWater(g, x, y, z) && isNaturalWater(g, sn, x, y, z);
 }
 
-int touchesLiquid(Generator *g, SurfaceNoise *sn, chunkMask *cm, Piece *p) {
+int touchesLiquid(Generator *g, SurfaceNoise *sn, ChunkMask *cm, Piece *p) {
     for (int x = p->bb0.x - 1; x <= p->bb1.x + 1; x++)
         for (int z = p->bb0.z - 1; z <= p->bb1.z + 1; z++)
             if (isLiquid(g, sn, cm, x, p->bb0.y - 1, z) || isLiquid(g, sn, cm, x, p->bb1.y + 1, z))
@@ -490,11 +490,11 @@ int touchesLiquid(Generator *g, SurfaceNoise *sn, chunkMask *cm, Piece *p) {
     return 0;
 }
 
-static int topSolidBlock(Generator *g, const SurfaceNoise *sn, chunkMask *cm, int x, int z);
+static int topSolidBlock(Generator *g, const SurfaceNoise *sn, ChunkMask *cm, int x, int z);
 int couldBeNaturalWater(Generator *g, int x, int y, int z);
 
 
-static int isAirBlock(Generator *g, const SurfaceNoise *sn, chunkMask *cm, int x, int y, int z) {
+static int isAirBlock(Generator *g, const SurfaceNoise *sn, ChunkMask *cm, int x, int y, int z) {
     int o = getDetails(cm, x, y, z);
     if (o != DETAIL_NONE) return o == DETAIL_AIR;
     if (getMask(cm->water, cm->cx, cm->cz, x, y, z)) return 0;
@@ -524,7 +524,7 @@ static inline double columnDensityAt(const double dens[2][2][DENSITY_CELLS], int
     return lerp(fz, lx0, lx1);
 }
 
-static int topSolidBlock(Generator *g, const SurfaceNoise *sn, chunkMask *cm, int x, int z) {
+static int topSolidBlock(Generator *g, const SurfaceNoise *sn, ChunkMask *cm, int x, int z) {
     int li = ((z - cm->cz) << 4) | (x - cm->cx);
     if (cm->topBlockValid[li]) return cm->topBlock[li];
 
@@ -551,7 +551,7 @@ static int topSolidBlock(Generator *g, const SurfaceNoise *sn, chunkMask *cm, in
     return top;
 }
 
-static inline int isInterior(Generator *g, const SurfaceNoise *sn, chunkMask *cm, int x, int yAbove, int z) {
+static inline int isInterior(Generator *g, const SurfaceNoise *sn, ChunkMask *cm, int x, int yAbove, int z) {
     return yAbove <= topSolidBlock(g, sn, cm, x, z);
 }
 
@@ -569,8 +569,7 @@ static void carveChunk(Generator *g, SurfaceNoise *sn, CarverCache *cc, int cx16
     }
 }
 
-static void writeLakesToChunk(Generator *g, SurfaceNoise *sn, chunkMask *tgt, int mc, uint64_t seed,
-                         int *chunkXs, int *chunkZs, int nchunks, int ci, CarverCache *carverCache) {
+static void writeLakesToChunk(Generator *g, SurfaceNoise *sn, ChunkMask *tgt, int mc, uint64_t seed, int *chunkXs, int *chunkZs, int nchunks, int ci, CarverCache *carverCache) {
     static const int offs[4][2] = {{-16,-16},{-16,0},{0,-16},{0,0}}; // NW, W, N, self
     int order[4];
     Pos3List *ca[4], *cw[4];
@@ -583,7 +582,10 @@ static void writeLakesToChunk(Generator *g, SurfaceNoise *sn, chunkMask *tgt, in
         } else {
             idx = -1;
             for (int q = 0; q < nchunks; q++)
-                if (chunkXs[q] == sx && chunkZs[q] == sz) { idx = q; break; }
+                if (chunkXs[q] == sx && chunkZs[q] == sz) { 
+                    idx = q; 
+                    break; 
+                }
             if (idx < 0 || idx > ci) continue; // not decorated yet
         }
         carveChunk(g, sn, &carverCache[idx], sx, sz);
@@ -609,7 +611,7 @@ static void writeLakesToChunk(Generator *g, SurfaceNoise *sn, chunkMask *tgt, in
     freePos3List(&lakeLava);
 }
 
-static int isSupportingBox(Generator *g, const SurfaceNoise *sn, Piece *p, int x0, int x1, int z0, chunkMask *cm) {
+static int isSupportingBox(Generator *g, const SurfaceNoise *sn, Piece *p, int x0, int x1, int z0, ChunkMask *cm) {
     int ceilY = p->bb0.y + 3;
     for (int x = x0; x <= x1; x++) {
         int tx = x, tz = z0;
@@ -624,13 +626,13 @@ static int isSupportingBox(Generator *g, const SurfaceNoise *sn, Piece *p, int x
     return 1;
 }
 
-static void setLocalDetail(chunkMask *cm, Piece *p, int x, int y, int z, int v) {
+static void setLocalDetail(ChunkMask *cm, Piece *p, int x, int y, int z, int v) {
     rotPos(p->bb0, p->bb1, &x, &z, p->rot);
     setDetails(cm, x, p->bb0.y + y, z, v);
 }
 
 static void placeSupport(Generator *g, const SurfaceNoise *sn, Piece *p, int x0, int z, int x1,
-                         RandomSource rnd, chunkMask *cm) {
+                         RandomSource rnd, ChunkMask *cm) {
     int sup = isSupportingBox(g, sn, p, x0, x1, z, cm);
     if (sup) {
         for (int yy = 0; yy <= 1; yy++) {
@@ -651,7 +653,7 @@ static void placeSupport(Generator *g, const SurfaceNoise *sn, Piece *p, int x0,
     }
 }
 
-static void maybePlaceCobWeb(Generator *g, const SurfaceNoise *sn, chunkMask *cm, Piece *p, RandomSource rnd, float chance, int x, int z) {
+static void maybePlaceCobWeb(Generator *g, const SurfaceNoise *sn, ChunkMask *cm, Piece *p, RandomSource rnd, float chance, int x, int z) {
     int tx = x, tz = z;
     rotPos(p->bb0, p->bb1, &tx, &tz, p->rot);
     if (tx >= cm->cx && tx < cm->cx + 16 && tz >= cm->cz && tz < cm->cz + 16 &&
@@ -734,12 +736,15 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
     int *chunkXs = (int*)malloc(maxChunks * sizeof(int));
     int *chunkZs = (int*)malloc(maxChunks * sizeof(int));
     int nchunks = 0;
-    for (int cx = cMinX; cx <= cMaxX; cx += 16)
+    for (int cx = cMinX; cx <= cMaxX; cx += 16) {
         for (int cz = cMinZ; cz <= cMaxZ; cz += 16) {
             chunkXs[nchunks] = cx;
             chunkZs[nchunks] = cz;
             nchunks++;
         }
+    }
+
+    // insertion sort (since mineshafts actually require a specific radial chunk order to generate)
     for (int a = 1; a < nchunks; a++) {
         int keyX = chunkXs[a], keyZ = chunkZs[a];
         int kdx = (keyX >> 4) - chunkX, kdz = (keyZ >> 4) - chunkZ;
@@ -755,6 +760,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
         chunkXs[b+1] = keyX;
         chunkZs[b+1] = keyZ;
     }
+
     int *removed = (int*)calloc(count, sizeof(int));
     CarverCache *carverCache = (CarverCache*)calloc(nchunks, sizeof(CarverCache));
 
@@ -766,7 +772,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
 
         carveChunk(g, sn, &carverCache[ci], cx, cz);
 
-        chunkMask cm;
+        ChunkMask cm;
         cm.cx = cx;
         cm.cz = cz;
         fillMask(cm.air, &carverCache[ci].air, cx, cz);
