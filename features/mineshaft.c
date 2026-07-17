@@ -575,36 +575,44 @@ static void carveChunk(Generator *g, SurfaceNoise *sn, CarverCache *cc, int cx16
     }
 }
 
-static void writeLakesToChunk(Generator *g, SurfaceNoise *sn, ChunkMask *tgt, int mc, uint64_t seed, int *chunkXs, int *chunkZs, int nchunks, int ci, CarverCache *carverCache) {
-    static const int offs[4][2] = {{-16,-16},{-16,0},{0,-16},{0,0}}; // NW, W, N, self
+static void writeLakesToChunk(Generator *g, SurfaceNoise *sn, ChunkMask *tgt, int mc, uint64_t seed, int *chunkXs, int *chunkZs, int nchunks, int ci, CarverCache *carverCache, uint8_t **detailsCache) {
     int order[4];
-    Pos3List *ca[4], *cw[4];
-    for (int c = 0; c < 4; c++) {
-        order[c] = -1; ca[c] = NULL; cw[c] = NULL;
-        int sx = tgt->cx + offs[c][0], sz = tgt->cz + offs[c][1];
-        int idx;
-        if (c == 3) {
+    Pos3List *ca[3][3], *cw[3][3];
+    const uint8_t *det[3][3];
+    int cellIdx[3][3];
+    for (int dz = 0; dz < 3; dz++)
+    for (int dx = 0; dx < 3; dx++) {
+        int sx = tgt->cx + (dx - 1) * 16, sz = tgt->cz + (dz - 1) * 16;
+        int idx = -1;
+        if (dx == 1 && dz == 1) {
             idx = ci;
         } else {
-            idx = -1;
             for (int q = 0; q < nchunks; q++)
-                if (chunkXs[q] == sx && chunkZs[q] == sz) { 
-                    idx = q; 
-                    break; 
-                }
-            if (idx < 0 || idx > ci) continue; // not decorated yet
+                if (chunkXs[q] == sx && chunkZs[q] == sz) { idx = q; break; }
         }
-        carveChunk(g, sn, &carverCache[idx], sx, sz);
-        order[c] = idx;
-        ca[c] = &carverCache[idx].air;
-        cw[c] = &carverCache[idx].water;
+        cellIdx[dz][dx] = idx;
+        if (idx >= 0) {
+            carveChunk(g, sn, &carverCache[idx], sx, sz);
+            ca[dz][dx] = &carverCache[idx].air;
+            cw[dz][dx] = &carverCache[idx].water;
+            det[dz][dx] = idx < ci ? detailsCache[idx] : NULL;
+        } else {
+            ca[dz][dx] = NULL;
+            cw[dz][dx] = NULL;
+            det[dz][dx] = NULL;
+        }
+    }
+    static const int srcCell[4][2] = {{0,0},{0,1},{1,0},{1,1}}; // NW, W, N, self as [dx][dz]
+    for (int c = 0; c < 4; c++) {
+        int idx = cellIdx[srcCell[c][1]][srcCell[c][0]];
+        order[c] = (idx >= 0 && idx <= ci) ? idx : -1;
     }
 
     Pos3List lakeAir, lakeWater, lakeLava;
     createPos3List(&lakeAir, 1);
     createPos3List(&lakeWater, 1);
     createPos3List(&lakeLava, 1);
-    applyAllLakes(g, sn, mc, seed, tgt->cx >> 4, tgt->cz >> 4, order, ca, cw,
+    applyAllLakes(g, sn, mc, seed, tgt->cx >> 4, tgt->cz >> 4, order, ca, cw, det,
                   &lakeAir, &lakeWater, &lakeLava);
     for (int i = 0; i < lakeAir.size; i++)
         setDetails(tgt, lakeAir.pos3s[i].x, lakeAir.pos3s[i].y, lakeAir.pos3s[i].z, DETAIL_AIR);
@@ -747,6 +755,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
 
     int *removed = (int*)calloc(count, sizeof(int));
     CarverCache *carverCache = (CarverCache*)calloc(nchunks, sizeof(CarverCache));
+    uint8_t **detailsCache = (uint8_t**)calloc(nchunks, sizeof(uint8_t*));
 
     for (int ci = 0; ci < nchunks; ci++) {
         int cx = chunkXs[ci], cz = chunkZs[ci];
@@ -763,7 +772,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
         fillMask(cm.water, &carverCache[ci].water, cx, cz);
         memset(cm.topBlockValid, 0, sizeof(cm.topBlockValid));
         memset(cm.details, 0, sizeof(cm.details));
-        writeLakesToChunk(g, sn, &cm, mc, seed, chunkXs, chunkZs, nchunks, ci, carverCache);
+        writeLakesToChunk(g, sn, &cm, mc, seed, chunkXs, chunkZs, nchunks, ci, carverCache, detailsCache);
 
         for (int i = 0; i < count; ++i) {
             Piece *p = &list[i];
@@ -1004,9 +1013,14 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                 default: UNREACHABLE();
                 }
             }
+
+        detailsCache[ci] = (uint8_t*)malloc(sizeof(cm.details));
+        memcpy(detailsCache[ci], cm.details, sizeof(cm.details));
         }
 
     for (int q = 0; q < nchunks; q++) {
+        if (detailsCache[q])
+            free(detailsCache[q]);
         if (carverCache[q].valid) {
             freePos3List(&carverCache[q].air);
             freePos3List(&carverCache[q].water);
