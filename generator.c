@@ -773,15 +773,10 @@ STRUCT(CornerDensEntry) {
     int valid;
     double dens[CORNER_DENS_CELLS];
 };
-// the cache is a repeating 256x256 tile of the noise-cell corner grid: a
-// corner's slot is the low 8 bits of each coordinate, so two corners only
-// share a slot when they are an exact multiple of 256 cells (1024 blocks)
-// apart. The stored seed/cx/cz are checked before a slot is trusted, so a
-// collision or stale entry just recomputes and can never be wrong.
+
 static CornerDensEntry cornerDensCache[256 * 256];
 
-void surfaceCornerDens(const Generator *g, const SurfaceNoise *sn, int cx, int cz,
-                       double out[CORNER_DENS_CELLS])
+void surfaceCornerDens(const Generator *g, const SurfaceNoise *sn, int cx, int cz, double out[CORNER_DENS_CELLS])
 {
     uint32_t i = (cx & 255) | ((cz & 255) << 8);
     CornerDensEntry *e = &cornerDensCache[i];
@@ -790,44 +785,36 @@ void surfaceCornerDens(const Generator *g, const SurfaceNoise *sn, int cx, int c
         return;
     }
 
-    const float biome_kernel[25] = { // with 10 / (sqrt(i**2 + j**2) + 0.2)
-        3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
-        4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
-        4.545454545, 8.333333333, 50.00000000, 8.333333333, 4.545454545,
-        4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
-        3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
-    };
-
     Range r = {4, cx-2, cz-2, 5, 5, 0, 1};
     int *bigCache = allocCache(g, r);
     genBiomes(g, bigCache, r);
 
     double d0, s0;
-    double wt = 0, ws = 0, wd = 0;
+    float wt = 0, ws = 0, wd = 0;
     int ii, jj;
     getBiomeDepthAndScale(bigCache[2*r.sx + 2], &d0, &s0, 0);
-    for (jj = 0; jj < 5; jj++)
+    float f3 = (float) d0;
+    for (ii = 0; ii < 5; ii++)
     {
-        for (ii = 0; ii < 5; ii++)
+        for (jj = 0; jj < 5; jj++)
         {
             double d, s;
             int id = bigCache[jj*r.sx + ii];
             getBiomeDepthAndScale(id, &d, &s, 0);
-            float weight = biome_kernel[jj*5+ii] / (d + 2);
-            if (d > d0)
-                weight *= 0.5;
-            ws += s * weight;
-            wd += d * weight;
+            float f4 = (float) d, f5 = (float) s;
+            float kern = 10.0f / (float) sqrt((double)((float)((ii-2)*(ii-2) + (jj-2)*(jj-2)) + 0.2f));
+            float f8 = f4 > f3 ? 0.5f : 1.0f;
+            float weight = f8 * kern / (f4 + 2.0f);
+            ws += f5 * weight;
+            wd += f4 * weight;
             wt += weight;
         }
     }
     free(bigCache);
-    ws /= wt;
-    wd /= wt;
-    ws = ws * 0.9 + 0.1;
-    wd = (wd * 4.0 - 1) / 8;
-    ws = 96 / ws;
-    wd = wd * 17./64;
+    float f10 = wd / wt;
+    float f11 = ws / wt;
+    double wdd = (double)(f10 * 0.5f - 0.125f) * 0.265625;
+    double wss = 96.0 / (double)(f11 * 0.9f + 0.1f);
 
     double off = sampleOctaveAmp(&sn->octdepth, cx*200, 10, cz*200, 1, 0, 1);
     off *= 65535./8000;
@@ -842,7 +829,7 @@ void surfaceCornerDens(const Generator *g, const SurfaceNoise *sn, int cx, int c
     {
         double n0 = sampleSurfaceNoise(sn, cx, qy, cz);
         double fall = 1 - 2 * qy / 32.0 + off - 0.46875;
-        fall = ws * (fall + wd);
+        fall = wss * (fall + wdd);
         n0 += (fall > 0 ? 4*fall : fall);
         out[qy] = n0;
     }

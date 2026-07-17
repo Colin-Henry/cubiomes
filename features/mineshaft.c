@@ -475,17 +475,23 @@ static int isLiquid(Generator *g, SurfaceNoise *sn, ChunkMask *cm, int x, int y,
 }
 
 int touchesLiquid(Generator *g, SurfaceNoise *sn, ChunkMask *cm, Piece *p) {
-    for (int x = p->bb0.x - 1; x <= p->bb1.x + 1; x++)
-        for (int z = p->bb0.z - 1; z <= p->bb1.z + 1; z++)
-            if (isLiquid(g, sn, cm, x, p->bb0.y - 1, z) || isLiquid(g, sn, cm, x, p->bb1.y + 1, z))
+    int x0 = p->bb0.x - 1 > cm->cx ? p->bb0.x - 1 : cm->cx;
+    int x1 = p->bb1.x + 1 < cm->cx + 15 ? p->bb1.x + 1 : cm->cx + 15;
+    int z0 = p->bb0.z - 1 > cm->cz ? p->bb0.z - 1 : cm->cz;
+    int z1 = p->bb1.z + 1 < cm->cz + 15 ? p->bb1.z + 1 : cm->cz + 15;
+    int y0 = p->bb0.y - 1 > 1 ? p->bb0.y - 1 : 1;
+    int y1 = p->bb1.y + 1 < 512 ? p->bb1.y + 1 : 512;
+    for (int x = x0; x <= x1; x++)
+        for (int z = z0; z <= z1; z++)
+            if (isLiquid(g, sn, cm, x, y0, z) || isLiquid(g, sn, cm, x, y1, z))
                 return 1;
-    for (int x = p->bb0.x - 1; x <= p->bb1.x + 1; x++)
-        for (int y = p->bb0.y - 1; y <= p->bb1.y + 1; y++)
-            if (isLiquid(g, sn, cm, x, y, p->bb0.z - 1) || isLiquid(g, sn, cm, x, y, p->bb1.z + 1))
+    for (int x = x0; x <= x1; x++)
+        for (int y = y0; y <= y1; y++)
+            if (isLiquid(g, sn, cm, x, y, z0) || isLiquid(g, sn, cm, x, y, z1))
                 return 1;
-    for (int z = p->bb0.z - 1; z <= p->bb1.z + 1; z++)
-        for (int y = p->bb0.y - 1; y <= p->bb1.y + 1; y++)
-            if (isLiquid(g, sn, cm, p->bb0.x - 1, y, z) || isLiquid(g, sn, cm, p->bb1.x + 1, y, z))
+    for (int z = z0; z <= z1; z++)
+        for (int y = y0; y <= y1; y++)
+            if (isLiquid(g, sn, cm, x0, y, z) || isLiquid(g, sn, cm, x1, y, z))
                 return 1;
     return 0;
 }
