@@ -772,7 +772,7 @@ void applyAllCarvers(Generator *g, const SurfaceNoise *sn, int chunkX, int chunk
  * @param order Used primarily for interal mineshaft code. Use {-1, -1, -1, 0} otherwise
  * @param carvedAir Optional (pass NULL). airPoses from applyAllCarvers for NW/W/N/target chunks. 
  * @param carvedWater same but waterPoses from applyAllCarvers. Also optional (pass NULL)
- * @param details Optional (pass NULL)
+ * @param details Optional (pass NULL). Block overaly for already decorated chunks
  * @param lakeAir Pos3List of all lake air blocks
  * @param lakeWater Pos3List of all lake water blocks
  * @param lakeLava Pos3List of all lake lava blocks
