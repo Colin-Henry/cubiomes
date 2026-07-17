@@ -5036,7 +5036,7 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
         }
         return count;
     }
-    case Stronghold: return getStrongholdLoot(list, n, ssconf, mc, seed, posX >> 4, posZ >> 4);
+    case Stronghold: return getStrongholdLoot(NULL, NULL, list, n, ssconf, mc, seed, posX >> 4, posZ >> 4);
     // structures that have one piece and one chest
     case Treasure: {
         Piece* p = list;

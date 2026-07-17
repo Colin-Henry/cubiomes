@@ -436,9 +436,7 @@ int getStrongholdPieces(Piece *list, int n, int mc, uint64_t seed, int chunkX, i
             extendStrongholdPiece(&env, q);
         }
 
-        // necessary for <=1.12.2 to simulate random calls
-        // optional for >1.12.2, could add flag for accurate heights
-        if (mc <= MC_1_12_2 && !env.portal) {
+        if ((mc <= MC_1_12_2 && !env.portal) || (mc > MC_1_12_2 && *env.portal)) {
             int minY = p->bb0.y;
             int maxY = p->bb1.y;
             for (int i = 0; i < count; i++) {
@@ -488,7 +486,19 @@ static const Pos eye_positions[] = {
     {7, 11},
 };
 
-int getStrongholdLoot(Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ) {
+static void fillMaskSH(uint8_t *mask, Pos3List *list, int cx, int cz) {
+    memset(mask, 0, 8192);
+    for (int i = 0; i < list->size; i++) {
+        Pos3 a = list->pos3s[i];
+        int lx = a.x - cx, lz = a.z - cz;
+        if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || a.y < 0 || a.y > 255)
+            continue;
+        int idx = (a.y << 8) | (lz << 4) | lx;
+        mask[idx >> 3] |= 1 << (idx & 7);
+    }
+}
+
+int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ) {
     int count = getStrongholdPieces(list, n, mc, seed, chunkX, chunkZ);
 
     const int legacy = mc <= MC_1_17;
@@ -511,6 +521,22 @@ int getStrongholdLoot(Piece *list, int n, StructureSaltConfig ssconf, int mc, ui
     // slow code ahead
     for (int cx = cMinX; cx <= cMaxX; cx += 16) {
         for (int cz = cMinZ; cz <= cMaxZ; cz += 16) {
+
+            uint8_t airMask[8192], waterMask[8192];
+            if (g) {
+                Pos3List airList, waterList;
+                createPos3List(&airList, 16);
+                createPos3List(&waterList, 16);
+                applyAllCarvers(g, sn, cx >> 4, cz >> 4, &airList, &waterList);
+                fillMaskSH(airMask, &airList, cx, cz);
+                fillMaskSH(waterMask, &waterList, cx, cz);
+                freePos3List(&airList);
+                freePos3List(&waterList);
+            } else {
+                memset(airMask, 0, sizeof(airMask));
+                memset(waterMask, 0, sizeof(waterMask));
+            }
+
             CREATE_RANDOM_SOURCE(rnd, legacy);
             uint64_t populationSeed = getPopulationSeed(mc, seed, cx, cz);
             rnd.setSeed(rnd.state, populationSeed + ssconf.generationStep * 10000 + ssconf.decoratorIndex);
@@ -522,7 +548,7 @@ int getStrongholdLoot(Piece *list, int n, StructureSaltConfig ssconf, int mc, ui
                 }
                 switch (p->type) {
                 case SH_STRAIGHT:
-                    generateBox(p, cx, cz, 0, 0, 0, 4, 4, 6, 1, rnd);
+                    generateBox(p, cx, cz, 0, 0, 0, 4, 4, 6, 1, rnd, airMask, waterMask);
                     rnd.nextFloat(rnd.state);
                     rnd.nextFloat(rnd.state);
                     rnd.nextFloat(rnd.state);
@@ -530,7 +556,7 @@ int getStrongholdLoot(Piece *list, int n, StructureSaltConfig ssconf, int mc, ui
                     p->chestCount = 0;
                     break;
                 case SH_PRISON_HALL:
-                    generateBox(p, cx, cz, 0, 0, 0, 8, 4, 10, 1, rnd);
+                    generateBox(p, cx, cz, 0, 0, 0, 8, 4, 10, 1, rnd, airMask, waterMask);
                     rnd.skipN(rnd.state, 12);
                     // generateBox(p, cx, cz, 4, 1, 1, 4, 3, 1, 0, rnd);
                     // generateBox(p, cx, cz, 4, 1, 3, 4, 3, 3, 0, rnd);
@@ -540,11 +566,11 @@ int getStrongholdLoot(Piece *list, int n, StructureSaltConfig ssconf, int mc, ui
                     break;
                 case SH_LEFT_TURN:
                 case SH_RIGHT_TURN:
-                    generateBox(p, cx, cz, 0, 0, 0, 4, 4, 4, 1, rnd);
+                    generateBox(p, cx, cz, 0, 0, 0, 4, 4, 4, 1, rnd, airMask, waterMask);
                     p->chestCount = 0;
                     break;
                 case SH_ROOM_CROSSING: {
-                    generateBox(p, cx, cz, 0, 0, 0, 10, 6, 10, 1, rnd);
+                    generateBox(p, cx, cz, 0, 0, 0, 10, 6, 10, 1, rnd, airMask, waterMask);
                     if (!p->additionalData) {
                         p->chestCount = 0;
                         break;
@@ -561,15 +587,15 @@ int getStrongholdLoot(Piece *list, int n, StructureSaltConfig ssconf, int mc, ui
                     break;
                 }
                 case SH_STRAIGHT_STAIRS_DOWN:
-                    generateBox(p, cx, cz, 0, 0, 0, 4, 10, 7, 1, rnd);
+                    generateBox(p, cx, cz, 0, 0, 0, 4, 10, 7, 1, rnd, airMask, waterMask);
                     p->chestCount = 0;
                     break;
                 case SH_STAIRS_DOWN:
-                    generateBox(p, cx, cz, 0, 0, 0, 4, 10, 4, 1, rnd);
+                    generateBox(p, cx, cz, 0, 0, 0, 4, 10, 4, 1, rnd, airMask, waterMask);
                     p->chestCount = 0;
                     break;
                 case SH_FIVE_CROSSING:
-                    generateBox(p, cx, cz, 0, 0, 0, 9, 8, 10, 1, rnd);
+                    generateBox(p, cx, cz, 0, 0, 0, 9, 8, 10, 1, rnd, airMask, waterMask);
                     rnd.skipN(rnd.state, 109);
                     // generateBox(p, cx, cz, 1, 2, 1, 8, 2, 6, 0, rnd);
                     // generateBox(p, cx, cz, 4, 1, 5, 4, 4, 9, 0, rnd);
@@ -580,7 +606,7 @@ int getStrongholdLoot(Piece *list, int n, StructureSaltConfig ssconf, int mc, ui
                     p->chestCount = 0;
                     break;
                 case SH_CHEST_CORRIDOR: {
-                    generateBox(p, cx, cz, 0, 0, 0, 4, 4, 6, 1, rnd);
+                    generateBox(p, cx, cz, 0, 0, 0, 4, 4, 6, 1, rnd, airMask, waterMask);
                     int chestPosX = 3, chestPosZ = 3;
                     rotPos(p->bb0, p->bb1, &chestPosX, &chestPosZ, p->rot);
                     if (chestPosX >= cx && chestPosX < cx + 16 && chestPosZ >= cz && chestPosZ < cz + 16) {
@@ -602,7 +628,7 @@ int getStrongholdLoot(Piece *list, int n, StructureSaltConfig ssconf, int mc, ui
                         p->chestCount = 1;
                     }
 
-                    generateBox(p, cx, cz, 0, 0, 0, 13, currentHeight - 1, 14, 1, rnd);
+                    generateBox(p, cx, cz, 0, 0, 0, 13, currentHeight - 1, 14, 1, rnd, airMask, waterMask);
                     generateMaybeBox(2, 1, 1, 11, 4, 13, rnd);
                     int chestPosX = 3, chestPosZ = 5;
                     rotPos(p->bb0, p->bb1, &chestPosX, &chestPosZ, p->rot);
