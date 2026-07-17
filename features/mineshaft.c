@@ -690,30 +690,8 @@ int lookupBiome(Generator *g, int px, int pz) {
     return id;
 }
 
-int couldBeNaturalWater(Generator *g, int x, int y, int z) { // tried to optimize via preliminary check
-    if (y >= 63 || y < 0)
-        return 0;
-
-    int id = lookupBiome(g, x >> 2, z >> 2);
-    double depth, scale;
-    getBiomeDepthAndScale(id, &depth, &scale, 0);
-
-    scale = scale * 0.9 + 0.1;
-    depth = (depth * 4.0 - 1) / 8;
-    scale = 96 / scale;
-    depth = depth * 17. / 64;
-
-    int py = y >> 3;
-    double worstCaseDensity = 1e300;
-    int k;
-    for (k = 0; k <= 1; k++) {
-        double fall = 1 - 2 * (py + k) / 32.0 + (-2.0 * 17./64 / 28.) - 0.46875;
-        fall = scale * (fall + depth);
-        double density = (fall > 0 ? 4*fall : fall) - 8.0;
-        if (density < worstCaseDensity)
-            worstCaseDensity = density;
-    }
-    return worstCaseDensity <= 0;
+int couldBeNaturalWater(Generator *g, int x, int y, int z) {
+    return y < 63 && y >= 0;
 }
 
 int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ) {
