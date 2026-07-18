@@ -426,6 +426,7 @@ STRUCT(ChunkMask) {
 #define DETAIL_DECOR 3
 #define DETAIL_WATER 4
 #define DETAIL_LAVA  5
+#define DETAIL_LAKEAIR 6
 
 static inline void setDetails(ChunkMask *cm, int x, int y, int z, int v) {
     int lx = x - cm->cx, lz = z - cm->cz;
@@ -502,7 +503,7 @@ int couldBeNaturalWater(Generator *g, int x, int y, int z);
 
 static int isAirBlock(Generator *g, const SurfaceNoise *sn, ChunkMask *cm, int x, int y, int z) {
     int o = getDetails(cm, x, y, z);
-    if (o != DETAIL_NONE) return o == DETAIL_AIR;
+    if (o != DETAIL_NONE) return o == DETAIL_AIR || o == DETAIL_LAKEAIR;
     if (getMask(cm->water, cm->cx, cm->cz, x, y, z)) return 0;
     if (getMask(cm->air, cm->cx, cm->cz, x, y, z)) return y >= 11;
     if (y >= 63 && y > topSolidBlock(g, sn, cm, x, z)) return 1;
@@ -615,7 +616,7 @@ static void writeLakesToChunk(Generator *g, SurfaceNoise *sn, ChunkMask *tgt, in
     applyAllLakes(g, sn, mc, seed, tgt->cx >> 4, tgt->cz >> 4, order, ca, cw, det,
                   &lakeAir, &lakeWater, &lakeLava);
     for (int i = 0; i < lakeAir.size; i++)
-        setDetails(tgt, lakeAir.pos3s[i].x, lakeAir.pos3s[i].y, lakeAir.pos3s[i].z, DETAIL_AIR);
+        setDetails(tgt, lakeAir.pos3s[i].x, lakeAir.pos3s[i].y, lakeAir.pos3s[i].z, DETAIL_LAKEAIR);
     for (int i = 0; i < lakeWater.size; i++)
         setDetails(tgt, lakeWater.pos3s[i].x, lakeWater.pos3s[i].y, lakeWater.pos3s[i].z, DETAIL_WATER);
     for (int i = 0; i < lakeLava.size; i++)
