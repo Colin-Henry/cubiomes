@@ -436,6 +436,10 @@ int getStrongholdPieces(Piece *list, int n, int mc, uint64_t seed, int chunkX, i
             extendStrongholdPiece(&env, q);
         }
 
+        if (mc > MC_1_12_2 && *env.portal) {
+            int sz = 0; Piece *dq = list; while (dq->next) { dq = dq->next; sz++; }
+            for (; sz >= 1; sz--) nextInt(&rng, sz);
+        }
         if ((mc <= MC_1_12_2 && !env.portal) || (mc > MC_1_12_2 && *env.portal)) {
             int minY = p->bb0.y;
             int maxY = p->bb1.y;
