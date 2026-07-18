@@ -2951,6 +2951,7 @@ static int lakeBlockKind(const Generator *g, const SurfaceNoise *sn, const LakeW
             if (o == 3) return 4;              // DETAIL_DECOR
             if (o == 4) return 2;              // DETAIL_WATER
             if (o == 5) return 3;              // DETAIL_LAVA
+            if (o == 6) return 0;              // DETAIL_LAKEAIR (lake air = air)
         }
         int c16x = lw->baseCx16 + (cx << 4), c16z = lw->baseCz16 + (cz << 4);
         if (lw->waterM[cz][cx] && lakeMaskGet(lw->waterM[cz][cx], c16x, c16z, x, y, z))

@@ -503,6 +503,24 @@ static void fillMaskSH(uint8_t *mask, Pos3List *list, int cx, int cz) {
     }
 }
 
+STRUCT(ShCarverCache) { Pos3List air, water; int valid; };
+static void shCarveChunk(Generator *g, SurfaceNoise *sn, ShCarverCache *cc, int cx, int cz) {
+    if (!cc->valid) {
+        createPos3List(&cc->air, 16);
+        createPos3List(&cc->water, 16);
+        applyAllCarvers(g, sn, cx >> 4, cz >> 4, &cc->air, &cc->water);
+        cc->valid = 1;
+    }
+}
+
+static inline void shSetLakeDetail(uint8_t *d, int x, int y, int z, int cx, int cz, int v) {
+    int lx = x - cx, lz = z - cz;
+    if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || y < 0 || y > 255) return;
+    int idx = (y << 8) | (lz << 4) | lx;
+    int sh = (idx & 1) << 2;
+    d[idx >> 1] = (d[idx >> 1] & ~(0xF << sh)) | (v << sh);
+}
+
 int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ) {
     int count = getStrongholdPieces(list, n, mc, seed, chunkX, chunkZ);
 
@@ -556,6 +574,70 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
         free(msLoot);
     }
 
+    Pos3List lakeAirAll, lakeWaterAll;
+    createPos3List(&lakeAirAll, 32);
+    createPos3List(&lakeWaterAll, 32);
+    
+    if (g) {
+        int lcx0 = (minX - 1) >> 4, lcx1 = (maxX + 1) >> 4;
+        int lcz0 = (minZ - 1) >> 4, lcz1 = (maxZ + 1) >> 4;
+        int nchunks = (lcx1 - lcx0 + 1) * (lcz1 - lcz0 + 1);
+        int *chunkXs = (int*)malloc(nchunks * sizeof(int));
+        int *chunkZs = (int*)malloc(nchunks * sizeof(int));
+        int k = 0;
+
+        for (int cxc = lcx0; cxc <= lcx1; ++cxc) {
+            for (int czc = lcz0; czc <= lcz1; ++czc) { 
+                chunkXs[k] = cxc << 4; chunkZs[k] = czc << 4; ++k; 
+            }
+        }
+
+        ShCarverCache *cc = (ShCarverCache*)calloc(nchunks, sizeof(ShCarverCache));
+        uint8_t **lakeDet = (uint8_t**)calloc(nchunks, sizeof(uint8_t*));
+        for (int ci = 0; ci < nchunks; ++ci) {
+            int cx = chunkXs[ci], cz = chunkZs[ci];
+            shCarveChunk(g, sn, &cc[ci], cx, cz);
+            Pos3List *ca[3][3], *cw[3][3]; const uint8_t *det[3][3]; int cellIdx[3][3];
+
+            for (int dz = 0; dz < 3; ++dz) {
+                for (int dx = 0; dx < 3; ++dx) {
+                    int sx = cx + (dx - 1) * 16, sz = cz + (dz - 1) * 16;
+                    int idx = -1;
+                    if (dx == 1 && dz == 1) idx = ci;
+                    else for (int q = 0; q < nchunks; ++q) if (chunkXs[q] == sx && chunkZs[q] == sz) { idx = q; break; }
+                    cellIdx[dz][dx] = idx;
+                    if (idx >= 0) {
+                        shCarveChunk(g, sn, &cc[idx], sx, sz);
+                        ca[dz][dx] = &cc[idx].air;
+                        cw[dz][dx] = &cc[idx].water;
+                        det[dz][dx] = idx < ci ? lakeDet[idx] : NULL;
+                    } else { ca[dz][dx] = NULL; cw[dz][dx] = NULL; det[dz][dx] = NULL; }
+                }
+            }
+
+            static const int srcCell[4][2] = {{0,0},{0,1},{1,0},{1,1}}; // NW, W, N, self as [dx][dz]
+            int order[4];
+            for (int c = 0; c < 4; ++c) { int idx = cellIdx[srcCell[c][1]][srcCell[c][0]]; order[c] = (idx >= 0 && idx <= ci) ? idx : -1; }
+            Pos3List la, lw, ll; createPos3List(&la, 4); createPos3List(&lw, 4); createPos3List(&ll, 4);
+            applyAllLakes(g, sn, mc, seed, cx >> 4, cz >> 4, order, ca, cw, det, &la, &lw, &ll);
+            lakeDet[ci] = (uint8_t*)calloc(1, 32768);
+            for (int i = 0; i < la.size; ++i) { shSetLakeDetail(lakeDet[ci], la.pos3s[i].x, la.pos3s[i].y, la.pos3s[i].z, cx, cz, 1); appendPos3List(&lakeAirAll, la.pos3s[i]); }
+            for (int i = 0; i < lw.size; ++i) { shSetLakeDetail(lakeDet[ci], lw.pos3s[i].x, lw.pos3s[i].y, lw.pos3s[i].z, cx, cz, 4); appendPos3List(&lakeWaterAll, lw.pos3s[i]); }
+            for (int i = 0; i < ll.size; ++i) shSetLakeDetail(lakeDet[ci], ll.pos3s[i].x, ll.pos3s[i].y, ll.pos3s[i].z, cx, cz, 5);
+            freePos3List(&la); freePos3List(&lw); freePos3List(&ll);
+        }
+
+        for (int q = 0; q < nchunks; ++q) {
+            if (lakeDet[q]) free(lakeDet[q]);
+            if (cc[q].valid) { freePos3List(&cc[q].air); freePos3List(&cc[q].water); }
+        }
+
+        free(cc); 
+        free(lakeDet); 
+        free(chunkXs); 
+        free(chunkZs);
+    }
+
     // slow code ahead
     for (int cx = cMinX; cx <= cMaxX; cx += 16) {
         for (int cz = cMinZ; cz <= cMaxZ; cz += 16) {
@@ -568,6 +650,10 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
                 applyAllCarvers(g, sn, cx >> 4, cz >> 4, &airList, &waterList);
                 for (int i = 0; i < mineshaftAir.size; ++i)
                     appendPos3List(&airList, mineshaftAir.pos3s[i]);
+                for (int i = 0; i < lakeAirAll.size; ++i)
+                    appendPos3List(&airList, lakeAirAll.pos3s[i]);
+                for (int i = 0; i < lakeWaterAll.size; ++i)
+                    appendPos3List(&waterList, lakeWaterAll.pos3s[i]);
                 fillMaskSH(airMask, &airList, cx, cz);
                 fillMaskSH(waterMask, &waterList, cx, cz);
                 freePos3List(&airList);
@@ -724,5 +810,7 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
         }
     }
     freePos3List(&mineshaftAir);
+    freePos3List(&lakeAirAll);
+    freePos3List(&lakeWaterAll);
     return count;
 }
