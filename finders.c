@@ -2380,6 +2380,28 @@ static inline int getCarveMask(const char carvingMask[], int x, int y, int z, in
     return BITTEST(carvingMask, maskIndex);
 }
 
+// Java's MathHelper.sin/cos: a 65536-entry float lookup table, NOT true trig.
+// Vanilla carver tunnel walks use it, and its quantization error (~1e-4/step)
+// accumulates into block-level position drift, so it must be replicated exactly.
+static float mcSinTable[65536];
+static int mcSinTableReady = 0;
+
+static void mcSinTableInit(void) {
+    for (int i = 0; i < 65536; i++)
+        mcSinTable[i] = (float)sin((double)i * PI * 2.0 / 65536.0);
+    mcSinTableReady = 1;
+}
+
+static inline float mcSin(float v) {
+    if (!mcSinTableReady) mcSinTableInit();
+    return mcSinTable[(int)(v * 10430.378F) & 0xffff];
+}
+
+static inline float mcCos(float v) {
+    if (!mcSinTableReady) mcSinTableInit();
+    return mcSinTable[(int)(v * 10430.378F + 16384.0F) & 0xffff];
+}
+
 static int canReach(int chunkX, int chunkZ, double x, double z, int branchIndex, int branchCount, float width) {
     double d = (chunkX << 4) + 8;
     double e = (chunkZ << 4) + 8;
@@ -2546,15 +2568,22 @@ static void carveCanyonInner(CanyonCarverConfig ccc, int mc, uint64_t *rnd, int 
     float g = 0.0F;
 
     for (int branchIndex = 0; branchIndex < branchCount; branchIndex++) {
-        double horizontalRadius = 1.5 + sin(branchIndex * (float) PI / branchCount) * thickness;
+        double horizontalRadius = 1.5 + (double)(mcSin(branchIndex * (float) PI / branchCount) * thickness);
         double verticalRadius = horizontalRadius * horizontalVerticalRatio;
-        horizontalRadius *= ccc.horizontalRadiusFactor(rnd, ccc.minHorRadius, ccc.maxHorRadius);
-        verticalRadius = updateVerticalRadius(ccc, rnd, verticalRadius, branchCount, branchIndex);
-        float h = cos(pitch);
-        float j = sin(pitch);
-        x += cos(yaw) * h;
-        y += j;
-        z += sin(yaw) * h;
+        if (mc <= MC_1_16_5) {
+            // vanilla 1.16 multiplies both radii by (double)nextFloat()*0.25+0.75 in
+            // double precision; the float provider path rounds differently
+            horizontalRadius *= (double)nextFloat(rnd) * 0.25 + 0.75;
+            verticalRadius *= (double)nextFloat(rnd) * 0.25 + 0.75;
+        } else {
+            horizontalRadius *= ccc.horizontalRadiusFactor(rnd, ccc.minHorRadius, ccc.maxHorRadius);
+            verticalRadius = updateVerticalRadius(ccc, rnd, verticalRadius, branchCount, branchIndex);
+        }
+        float h = mcCos(pitch);
+        float j = mcSin(pitch);
+        x += (double)(mcCos(yaw) * h);
+        y += (double)j;
+        z += (double)(mcSin(yaw) * h);
         pitch *= 0.7F;
         pitch += g * 0.05F;
         yaw += f * 0.05F;
@@ -2655,7 +2684,7 @@ static void carveCaveInner(CaveCarverConfig ccc, uint64_t* rnd, int sourceChunkX
 }
 
 static void createRoom(int sourceChunkX, int sourceChunkZ, double x, double y, double z, float radius, double horizontalVerticalRatio, int worldMinY, int worldHeight, char carvingMask[], double floorLevel, Pos3List* poses, NaturalWaterCache *hasWater) {
-    double horizontalRadius = 1.5 + sin(PI / 2) * radius;
+    double horizontalRadius = 1.5 + (double)(mcSin((float) PI / 2.0F) * radius);
     double verticalRadius = horizontalRadius * horizontalVerticalRatio;
     carveEllipsoid(sourceChunkX, sourceChunkZ, x + 1.0, y, z, horizontalRadius, verticalRadius, worldMinY, worldHeight, carvingMask, shouldSkipCaveCarve, &floorLevel, poses, hasWater);
 }
@@ -2669,12 +2698,12 @@ static void createTunnel(CaveCarverConfig ccc, int sourceChunkX, int sourceChunk
     float g = 0.0F;
 
     for (int j = branchIndex; j < branchCount; j++) {
-        double d = 1.5 + sin((float) PI * j / branchCount) * thickness;
+        double d = 1.5 + (double)(mcSin((float) PI * j / branchCount) * thickness);
         double e = d * horizontalVerticalRatio;
-        float h = cos(pitch);
-        x += cos(yaw) * h;
-        y += sin(pitch);
-        z += sin(yaw) * h;
+        float h = mcCos(pitch);
+        x += (double)(mcCos(yaw) * h);
+        y += (double)mcSin(pitch);
+        z += (double)(mcSin(yaw) * h);
         pitch *= bl ? 0.92F : 0.7F;
         pitch += g * 0.1F;
         yaw += f * 0.1F;
@@ -2702,11 +2731,16 @@ static void createTunnel(CaveCarverConfig ccc, int sourceChunkX, int sourceChunk
     }
 }
 
+// debug trace: logs every ellipsoid carve evaluated for chunk (carverTraceCx,carverTraceCz)
+FILE *carverTraceFile = NULL;
+int carverTraceCx = 0x7fffffff, carverTraceCz = 0x7fffffff;
+
 static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z, double horizontalRadius, double verticalRadius, int worldMinY, int worldHeight, char carvingMask[], int (*shouldSkip)(double, double, double, int, int, void*), void* arg, Pos3List* poses, NaturalWaterCache *hasWater) {
     const int startChunkX = chunkX << 4;
     const int startChunkZ = chunkZ << 4;
     const double midChunkX = startChunkX + 8;
     const double midChunkZ = startChunkZ + 8;
+    int trace = carverTraceFile && chunkX == carverTraceCx && chunkZ == carverTraceCz;
     double f = 16.0 + horizontalRadius * 2.0;
     if (fabs(x - midChunkX) > f || fabs(z - midChunkZ) > f) {
         return;
@@ -2736,14 +2770,19 @@ static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z,
             for (int r2 = js; r2 < jtEx; r2++) {
                 int edge = (q2 == jo || q2 == jpEx - 1 || r2 == js || r2 == jtEx - 1);
                 for (int s2 = jq - 1; s2 <= jr + 1; s2++) {
-                    if (naturalWaterAt(hasWater, q2, s2, r2))
+                    if (naturalWaterAt(hasWater, q2, s2, r2)) {
+                        if (trace)
+                            fprintf(carverTraceFile, "ELLW %.17g %.17g %.17g %.17g %.17g water=(%d,%d,%d)\n", x, y, z, horizontalRadius, verticalRadius, (carverTraceCx << 4) + q2, s2, (carverTraceCz << 4) + r2);
                         return;
+                    }
                     if (s2 != jr + 1 && !edge)
                         s2 = jr;
                 }
             }
         }
     }
+    if (trace)
+        fprintf(carverTraceFile, "ELL %.17g %.17g %.17g %.17g %.17g\n", x, y, z, horizontalRadius, verticalRadius);
 
     for (int relX = minX; relX <= maxX; relX++) {
         int absX = startChunkX + relX;
