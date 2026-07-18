@@ -58,7 +58,7 @@ enum {
  * @param chunkZ the chunk Z-coordinate
  * @return the number of pieces that were generated
  */
-int getStrongholdLoot(Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ);
+int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ);
 
 #ifdef __cplusplus
 }

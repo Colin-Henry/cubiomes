@@ -40,9 +40,10 @@ enum {
  * @param seed the world seed
  * @param chunkX the chunk X-coordinate
  * @param chunkZ the chunk Z-coordinate
+ * @param airOut Pass NULL. Used internally for strongholds (strongholds depend on certain mineshaft generation)
  * @return the completed list of mineshaft pieces with loot
  */
-int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ);
+int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ, Pos3List *airOut);
 
 #ifdef __cplusplus
 }
