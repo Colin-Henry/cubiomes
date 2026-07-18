@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "piece.h"
+#include "mineshaft.h"
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -522,6 +523,39 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
     int cMaxX = maxX & ~15;
     int cMaxZ = maxZ & ~15;
 
+    Pos3List mineshaftAir;
+    createPos3List(&mineshaftAir, 64);
+    if (g) {
+        int sMinY = list[0].bb0.y, sMaxY = list[0].bb1.y;
+        for (int i = 0; i < count; ++i) {
+            sMinY = MIN(sMinY, list[i].bb0.y);
+            sMaxY = MAX(sMaxY, list[i].bb1.y);
+        }
+        Piece *msPieces = (Piece*)malloc(2048 * sizeof(Piece));
+        Piece *msLoot = (Piece*)malloc(2048 * sizeof(Piece));
+        for (int rx = (minX >> 4) - 8; rx <= (maxX >> 4) + 8; ++rx) {
+            for (int rz = (minZ >> 4) - 8; rz <= (maxZ >> 4) + 8; ++rz) {
+                Pos mp;
+                if (!getStructurePos(Mineshaft, mc, seed, rx, rz, &mp)) continue;
+                if (!isViableStructurePos(Mineshaft, g, mp.x, mp.z, 0)) continue;
+                int mn = getMineshaftPieces(g, msPieces, 2048, mc, seed, rx, rz);
+                int hit = 0;
+                for (int i = 0; i < mn; ++i) {
+                    Piece *q = &msPieces[i];
+                    if (q->bb1.x >= minX && q->bb0.x <= maxX &&
+                        q->bb1.z >= minZ && q->bb0.z <= maxZ &&
+                        q->bb1.y >= sMinY && q->bb0.y <= sMaxY) { hit = 1; break; }
+                }
+                if (!hit) continue;
+                StructureSaltConfig msconf;
+                getStructureSaltConfig(Mineshaft, mc, getBiomeAt(g, 4, mp.x, 64, mp.z), &msconf);
+                getMineshaftLoot(g, sn, msLoot, 2048, msconf, mc, seed, rx, rz, &mineshaftAir);
+            }
+        }
+        free(msPieces);
+        free(msLoot);
+    }
+
     // slow code ahead
     for (int cx = cMinX; cx <= cMaxX; cx += 16) {
         for (int cz = cMinZ; cz <= cMaxZ; cz += 16) {
@@ -532,6 +566,8 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
                 createPos3List(&airList, 16);
                 createPos3List(&waterList, 16);
                 applyAllCarvers(g, sn, cx >> 4, cz >> 4, &airList, &waterList);
+                for (int i = 0; i < mineshaftAir.size; ++i)
+                    appendPos3List(&airList, mineshaftAir.pos3s[i]);
                 fillMaskSH(airMask, &airList, cx, cz);
                 fillMaskSH(waterMask, &waterList, cx, cz);
                 freePos3List(&airList);
@@ -687,5 +723,6 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
             }
         }
     }
+    freePos3List(&mineshaftAir);
     return count;
 }

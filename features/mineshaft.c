@@ -702,7 +702,7 @@ int couldBeNaturalWater(Generator *g, int x, int y, int z) {
     return y < 63 && y >= 0;
 }
 
-int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ) {
+int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ, Pos3List *airOut) {
     int count = getMineshaftPieces(g, list, n, mc, seed, chunkX, chunkZ);
 
     const int legacy = mc <= MC_1_17;
@@ -1011,12 +1011,29 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
                     break;
                 }
                 default: UNREACHABLE();
-                }
             }
+        }
 
         detailsCache[ci] = (uint8_t*)malloc(sizeof(cm.details));
         memcpy(detailsCache[ci], cm.details, sizeof(cm.details));
+    }
+
+    if (airOut) {
+        for (int ci = 0; ci < nchunks; ci++) {
+            uint8_t *d = detailsCache[ci];
+            if (!d) continue;
+            int bcx = chunkXs[ci], bcz = chunkZs[ci];
+            for (int y = 0; y <= 255; y++)
+            for (int lz = 0; lz < 16; lz++)
+            for (int lx = 0; lx < 16; lx++) {
+                int idx = (y << 8) | (lz << 4) | lx;
+                if (((d[idx >> 1] >> ((idx & 1) << 2)) & 0xF) == DETAIL_AIR) {
+                    Pos3 pos = {bcx + lx, y, bcz + lz};
+                    appendPos3List(airOut, pos);
+                }
+            }
         }
+    }
 
     for (int q = 0; q < nchunks; q++) {
         if (detailsCache[q])
