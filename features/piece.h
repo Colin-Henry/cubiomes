@@ -2,6 +2,8 @@
 #define PIECE_H_
 
 #include "../finders.h"
+#include <stdio.h>
+#include <limits.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +31,11 @@ static inline int shellBlockIsAir(const uint8_t *airMask, const uint8_t *waterMa
     return 0;
 }
 
+// debug trace: when shTraceFile is set and (cx,cz) matches, generateBox logs every
+// in-chunk face block it evaluates ("F" = consumed nextFloat, "S" = skipped as air)
+extern FILE *shTraceFile;
+extern int shTraceCx, shTraceCz;
+
 static void generateBox(Piece *p, int cx, int cz, int x0, int y0, int z0, int x1, int y1, int z1, int skipAir, RandomSource rnd, const uint8_t *airMask, const uint8_t *waterMask) {
     if (!skipAir) {
         int w = x1 - x0 + 1;
@@ -50,7 +57,10 @@ static void generateBox(Piece *p, int cx, int cz, int x0, int y0, int z0, int x1
                 if (tx >= cx && tx < cx + 16 && tz >= cz && tz < cz + 16) {
                     if (y == y0 || y == y1 || x == x0 || x == x1 || z == z0 || z == z1) {
                         int wy = p->bb0.y + y;
-                        if (!shellBlockIsAir(airMask, waterMask, cx, cz, tx, wy, tz)) {
+                        int isair = shellBlockIsAir(airMask, waterMask, cx, cz, tx, wy, tz);
+                        if (shTraceFile && cx == shTraceCx && cz == shTraceCz)
+                            fprintf(shTraceFile, "%c %d %d %d %s\n", isair ? 'S' : 'F', tx, wy, tz, p->name);
+                        if (!isair) {
                             rnd.nextFloat(rnd.state);
                         }
                     }

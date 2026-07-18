@@ -8,6 +8,9 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
+FILE *shTraceFile = NULL;
+int shTraceCx = INT_MIN, shTraceCz = INT_MIN;
+
 STRUCT(StrongholdPieceEnv) {
     int mc;
     Piece *list;
