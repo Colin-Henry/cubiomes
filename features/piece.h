@@ -2,8 +2,6 @@
 #define PIECE_H_
 
 #include "../finders.h"
-#include <stdio.h>
-#include <limits.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,22 +19,20 @@ static inline void rotPos(Pos3 bb0, Pos3 bb1, int *x, int *z, int rot) {
     *x = posX, *z = posZ;
 }
 
-static inline int shellBlockIsAir(const uint8_t *airMask, const uint8_t *waterMask, int cx, int cz, int x, int y, int z) {
+// checks if given block is in any of the masks
+static inline int shellBlockIsAir(const uint8_t *airMask, const uint8_t *waterMask, const uint8_t *dungeonAirMask, const uint8_t *dungeonSolidMask, int cx, int cz, int x, int y, int z) {
     if (!airMask || y < 0 || y > 255) return 0;
     int lx = x - cx, lz = z - cz;
     if (lx < 0 || lx > 15 || lz < 0 || lz > 15) return 0;
     int idx = (y << 8) | (lz << 4) | lx;
+    if (dungeonSolidMask && ((dungeonSolidMask[idx >> 3] >> (idx & 7)) & 1)) return 0;
+    if (dungeonAirMask && ((dungeonAirMask[idx >> 3] >> (idx & 7)) & 1)) return 1;
     if (waterMask && ((waterMask[idx >> 3] >> (idx & 7)) & 1)) return 0;
     if ((airMask[idx >> 3] >> (idx & 7)) & 1) return y >= 11;
     return 0;
 }
 
-// debug trace: when shTraceFile is set and (cx,cz) matches, generateBox logs every
-// in-chunk face block it evaluates ("F" = consumed nextFloat, "S" = skipped as air)
-extern FILE *shTraceFile;
-extern int shTraceCx, shTraceCz;
-
-static void generateBox(Piece *p, int cx, int cz, int x0, int y0, int z0, int x1, int y1, int z1, int skipAir, RandomSource rnd, const uint8_t *airMask, const uint8_t *waterMask) {
+static void generateBox(Piece *p, int cx, int cz, int x0, int y0, int z0, int x1, int y1, int z1, int skipAir, RandomSource rnd, const uint8_t *airMask, const uint8_t *waterMask, const uint8_t *dungeonAirMask, const uint8_t *dungeonSolidMask) {
     if (!skipAir) {
         int w = x1 - x0 + 1;
         int d = z1 - z0 + 1;
@@ -57,10 +53,7 @@ static void generateBox(Piece *p, int cx, int cz, int x0, int y0, int z0, int x1
                 if (tx >= cx && tx < cx + 16 && tz >= cz && tz < cz + 16) {
                     if (y == y0 || y == y1 || x == x0 || x == x1 || z == z0 || z == z1) {
                         int wy = p->bb0.y + y;
-                        int isair = shellBlockIsAir(airMask, waterMask, cx, cz, tx, wy, tz);
-                        if (shTraceFile && cx == shTraceCx && cz == shTraceCz)
-                            fprintf(shTraceFile, "%c %d %d %d %s\n", isair ? 'S' : 'F', tx, wy, tz, p->name);
-                        if (!isair) {
+                        if (!shellBlockIsAir(airMask, waterMask, dungeonAirMask, dungeonSolidMask, cx, cz, tx, wy, tz)) {
                             rnd.nextFloat(rnd.state);
                         }
                     }

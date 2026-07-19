@@ -109,6 +109,7 @@ set(SOURCES
 	xradv.c
 	features/stronghold.c
 	features/mineshaft.c
+	features/dungeon.c
 	loot/items.c
 	loot/loot_functions.c
 	loot/loot_tables.c

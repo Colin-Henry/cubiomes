@@ -2731,16 +2731,11 @@ static void createTunnel(CaveCarverConfig ccc, int sourceChunkX, int sourceChunk
     }
 }
 
-// debug trace: logs every ellipsoid carve evaluated for chunk (carverTraceCx,carverTraceCz)
-FILE *carverTraceFile = NULL;
-int carverTraceCx = 0x7fffffff, carverTraceCz = 0x7fffffff;
-
 static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z, double horizontalRadius, double verticalRadius, int worldMinY, int worldHeight, char carvingMask[], int (*shouldSkip)(double, double, double, int, int, void*), void* arg, Pos3List* poses, NaturalWaterCache *hasWater) {
     const int startChunkX = chunkX << 4;
     const int startChunkZ = chunkZ << 4;
     const double midChunkX = startChunkX + 8;
     const double midChunkZ = startChunkZ + 8;
-    int trace = carverTraceFile && chunkX == carverTraceCx && chunkZ == carverTraceCz;
     double f = 16.0 + horizontalRadius * 2.0;
     if (fabs(x - midChunkX) > f || fabs(z - midChunkZ) > f) {
         return;
@@ -2770,19 +2765,14 @@ static void carveEllipsoid(int chunkX, int chunkZ, double x, double y, double z,
             for (int r2 = js; r2 < jtEx; r2++) {
                 int edge = (q2 == jo || q2 == jpEx - 1 || r2 == js || r2 == jtEx - 1);
                 for (int s2 = jq - 1; s2 <= jr + 1; s2++) {
-                    if (naturalWaterAt(hasWater, q2, s2, r2)) {
-                        if (trace)
-                            fprintf(carverTraceFile, "ELLW %.17g %.17g %.17g %.17g %.17g water=(%d,%d,%d)\n", x, y, z, horizontalRadius, verticalRadius, (carverTraceCx << 4) + q2, s2, (carverTraceCz << 4) + r2);
+                    if (naturalWaterAt(hasWater, q2, s2, r2))
                         return;
-                    }
                     if (s2 != jr + 1 && !edge)
                         s2 = jr;
                 }
             }
         }
     }
-    if (trace)
-        fprintf(carverTraceFile, "ELL %.17g %.17g %.17g %.17g %.17g\n", x, y, z, horizontalRadius, verticalRadius);
 
     for (int relX = minX; relX <= maxX; relX++) {
         int absX = startChunkX + relX;
@@ -5076,7 +5066,7 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
         }
         return count;
     }
-    case Stronghold: return getStrongholdLoot(NULL, NULL, list, n, ssconf, mc, seed, posX >> 4, posZ >> 4);
+    case Stronghold: return getStrongholdLoot(NULL, NULL, list, n, ssconf, mc, seed, posX >> 4, posZ >> 4, NULL);
     // structures that have one piece and one chest
     case Treasure: {
         Piece* p = list;

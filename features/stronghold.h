@@ -2,6 +2,7 @@
 #define STRONGHOLD_H_
 
 #include "../finders.h"
+#include "dungeon.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,9 +57,10 @@ enum {
  * @param seed the world seed (lower 48 bits suffice)
  * @param chunkX the chunk X-coordinate
  * @param chunkZ the chunk Z-coordinate
+ * @param dungeonsOut optional (pass NULL). Used internally to track dungeon locations (they indirectly influence stronghold chest loot)
  * @return the number of pieces that were generated
  */
-int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ);
+int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ, DungeonRoomList *dungeonsOut);
 
 #ifdef __cplusplus
 }
