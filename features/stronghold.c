@@ -689,6 +689,9 @@ static void shDungeonSet(void *vctx, int x, int y, int z, int kind) {
 }
 
 int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ, DungeonRoomList *dungeonsOut) {
+    if (g && (mc < MC_1_14 || mc > MC_1_16_5)) // carver/lake/mineshaft/dungeon logic is different in 1.17+ and 1.13-
+        return -1;
+
     int count = getStrongholdPieces(list, n, mc, seed, chunkX, chunkZ);
 
     const int legacy = mc <= MC_1_17;

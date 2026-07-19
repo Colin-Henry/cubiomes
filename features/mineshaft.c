@@ -704,6 +704,9 @@ int couldBeNaturalWater(Generator *g, int x, int y, int z) {
 }
 
 int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ, Pos3List *airOut) {
+    if (mc < MC_1_14 || mc > MC_1_16_5) // decorators are different in 1.17+ and 1.13-
+        return -1;
+
     int count = getMineshaftPieces(g, list, n, mc, seed, chunkX, chunkZ);
 
     const int legacy = mc <= MC_1_17;
