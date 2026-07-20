@@ -492,202 +492,6 @@ static const Pos eye_positions[] = {
     {7, 11},
 };
 
-static void fillMaskSH(uint8_t *mask, Pos3List *list, int cx, int cz) {
-    memset(mask, 0, 8192);
-    for (int i = 0; i < list->size; i++) {
-        Pos3 a = list->pos3s[i];
-        int lx = a.x - cx, lz = a.z - cz;
-        if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || a.y < 0 || a.y > 255)
-            continue;
-        int idx = (a.y << 8) | (lz << 4) | lx;
-        mask[idx >> 3] |= 1 << (idx & 7);
-    }
-}
-
-STRUCT(ShCarverCache) { Pos3List air, water; int valid; };
-static void shCarveChunk(Generator *g, SurfaceNoise *sn, ShCarverCache *cc, int cx, int cz) {
-    if (!cc->valid) {
-        createPos3List(&cc->air, 16);
-        createPos3List(&cc->water, 16);
-        applyAllCarvers(g, sn, cx >> 4, cz >> 4, &cc->air, &cc->water);
-        cc->valid = 1;
-    }
-}
-
-static inline void shSetLakeDetail(uint8_t *d, int x, int y, int z, int cx, int cz, int v) {
-    int lx = x - cx, lz = z - cz;
-    if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || y < 0 || y > 255) return;
-    int idx = (y << 8) | (lz << 4) | lx;
-    int sh = (idx & 1) << 2;
-    d[idx >> 1] = (d[idx >> 1] & ~(0xF << sh)) | (v << sh);
-}
-
-static inline int shGetLakeDetail(const uint8_t *d, int x, int y, int z, int cx, int cz) {
-    int lx = x - cx, lz = z - cz;
-    if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || y < 0 || y > 255) return 0;
-    int idx = (y << 8) | (lz << 4) | lx;
-    return (d[idx >> 1] >> ((idx & 1) << 2)) & 0xF;
-}
-
-static inline int shMaskGet(const uint8_t *mask, int cx, int cz, int x, int y, int z) {
-    int lx = x - cx, lz = z - cz;
-    if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || y < 0 || y > 255) return 0;
-    int idx = (y << 8) | (lz << 4) | lx;
-    return (mask[idx >> 3] >> (idx & 7)) & 1;
-}
-
-STRUCT(ShDungeonContext) {
-    Generator *g; SurfaceNoise *sn;
-    int lcx0, lcz0, ncx, ncz, ci;
-    ShCarverCache *cc;
-    int *chunkXs, *chunkZs;
-    uint8_t **lakeDetails;
-    uint8_t **dungeonDetails; // 1 is cave air, 2 is cobble, 3 is chest
-    uint8_t **carverAirMask, **carverWaterMask;
-    uint8_t **mineshaftAirMask;
-    const Pos3List *mineshaftAir;
-    Pos3List *dungeonAirBySrc, *dungeonSolidBySrc;
-    const Piece *pieces; int pieceCount;
-};
-
-static int shAnyPieceContains(ShDungeonContext *c, int x, int y, int z, const Piece *skip) {
-    for (int i = 0; i < c->pieceCount; i++) {
-        const Piece *p = &c->pieces[i];
-        if (p == skip) continue;
-        if (x >= p->bb0.x && x <= p->bb1.x && y >= p->bb0.y && y <= p->bb1.y &&
-            z >= p->bb0.z && z <= p->bb1.z)
-            return 1;
-    }
-    return 0;
-}
-
-static int shPieceAt(ShDungeonContext *c, int x, int y, int z) {
-    int best = -1;
-    for (int i = 0; i < c->pieceCount; i++) {
-        const Piece *p = &c->pieces[i];
-        if (x < p->bb0.x || x > p->bb1.x || y < p->bb0.y || y > p->bb1.y ||
-            z < p->bb0.z || z > p->bb1.z)
-            continue;
-        if (x > p->bb0.x && x < p->bb1.x && y > p->bb0.y && y < p->bb1.y &&
-            z > p->bb0.z && z < p->bb1.z)
-            return 1;
-        if (y >= p->bb0.y + 1 && y <= p->bb0.y + 3) {
-            int cxm = (p->bb0.x + p->bb1.x) >> 1;
-            int czm = (p->bb0.z + p->bb1.z) >> 1;
-            if ((x == p->bb0.x || x == p->bb1.x) && z >= czm - 1 && z <= czm + 1) {
-                if (shAnyPieceContains(c, x == p->bb0.x ? x - 1 : x + 1, y, z, p))
-                    return 1;
-            } else if ((z == p->bb0.z || z == p->bb1.z) && x >= cxm - 1 && x <= cxm + 1) {
-                if (shAnyPieceContains(c, x, y, z == p->bb0.z ? z - 1 : z + 1, p))
-                    return 1;
-            }
-        }
-        best = 0;
-    }
-    return best;
-}
-
-static int shDungeonIdx(ShDungeonContext *c, int bx, int bz) {
-    int cxi = (bx >> 4) - c->lcx0, czi = (bz >> 4) - c->lcz0;
-    if (cxi < 0 || cxi >= c->ncx || czi < 0 || czi >= c->ncz) return -1;
-    return cxi * c->ncz + czi;
-}
-
-static void shDungeonEnsureCarver(ShDungeonContext *c, int idx) {
-    if (c->carverAirMask[idx]) return;
-    shCarveChunk(c->g, c->sn, &c->cc[idx], c->chunkXs[idx], c->chunkZs[idx]);
-    c->carverAirMask[idx] = (uint8_t*)malloc(8192);
-    c->carverWaterMask[idx] = (uint8_t*)malloc(8192);
-    fillMaskSH(c->carverAirMask[idx], &c->cc[idx].air, c->chunkXs[idx], c->chunkZs[idx]);
-    fillMaskSH(c->carverWaterMask[idx], &c->cc[idx].water, c->chunkXs[idx], c->chunkZs[idx]);
-}
-
-static void shDungeonEnsureMineshaft(ShDungeonContext *c, int idx) {
-    if (c->mineshaftAirMask[idx]) return;
-    c->mineshaftAirMask[idx] = (uint8_t*)calloc(1, 8192);
-    int cx = c->chunkXs[idx], cz = c->chunkZs[idx];
-    for (int i = 0; i < c->mineshaftAir->size; i++) {
-        Pos3 a = c->mineshaftAir->pos3s[i];
-        int lx = a.x - cx, lz = a.z - cz;
-        if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || a.y < 0 || a.y > 255) continue;
-        int b = (a.y << 8) | (lz << 4) | lx;
-        c->mineshaftAirMask[idx][b >> 3] |= 1 << (b & 7);
-    }
-}
-
-static double shDungeonDensity(ShDungeonContext *c, int x, int y, int z) {
-    if (y >= 152) return -1.0;
-    double dens[2][2][20];
-    int px = x >> 2, pz = z >> 2;
-    for (int dx = 0; dx <= 1; dx++)
-        for (int dz = 0; dz <= 1; dz++)
-            surfaceCornerDens(c->g, c->sn, px + dx, pz + dz, dens[dx][dz]);
-    int py = y >> 3;
-    double fx = (x & 3) / 4.0, fy = (y & 7) / 8.0, fz = (z & 3) / 4.0;
-    double l00 = lerp(fy, dens[0][0][py], dens[0][0][py+1]);
-    double l10 = lerp(fy, dens[1][0][py], dens[1][0][py+1]);
-    double l01 = lerp(fy, dens[0][1][py], dens[0][1][py+1]);
-    double l11 = lerp(fy, dens[1][1][py], dens[1][1][py+1]);
-    return lerp(fz, lerp(fx, l00, l10), lerp(fx, l01, l11));
-}
-
-
-static int shDungeonBlock(void *vctx, int x, int y, int z, int wantAir) {
-    ShDungeonContext *c = (ShDungeonContext*)vctx;
-    if (y < 0 || y > 255) return wantAir;
-    int idx = shDungeonIdx(c, x, z);
-    int shellFace = 0;
-    if (idx >= 0) {
-        int seen = idx <= c->ci;
-        int cx = c->chunkXs[idx], cz = c->chunkZs[idx];
-        if (seen && c->dungeonDetails[idx]) {
-            int v = shGetLakeDetail(c->dungeonDetails[idx], x, y, z, cx, cz);
-            if (v == 1) return wantAir;
-            if (v) return !wantAir;
-        }
-
-        if (idx < c->ci) {
-            int pa = shPieceAt(c, x, y, z);
-            if (pa == 1) return wantAir;
-            if (pa == 0) shellFace = 1;
-        }
-        if (seen) {
-            shDungeonEnsureMineshaft(c, idx);
-            if (shMaskGet(c->mineshaftAirMask[idx], cx, cz, x, y, z)) return wantAir;
-        }
-        if (seen && c->lakeDetails[idx]) {
-            int v = shGetLakeDetail(c->lakeDetails[idx], x, y, z, cx, cz);
-            if (v == 1) return wantAir;
-            if (v == 4 || v == 5) return shellFace ? !wantAir : 0;
-        }
-        shDungeonEnsureCarver(c, idx);
-        if (shMaskGet(c->carverWaterMask[idx], cx, cz, x, y, z))
-            return shellFace ? !wantAir : (wantAir ? 0 : y == 10); // water floor y10 is magma
-        if (shMaskGet(c->carverAirMask[idx], cx, cz, x, y, z)) {
-            if (y >= 11) return wantAir;      // carved air stays air even on a face
-            return shellFace ? !wantAir : 0;  // below y11 carved air is lava
-        }
-    }
-    if (shellFace) return !wantAir;
-    double d = shDungeonDensity(c, x, y, z);
-    if (d > 0) return !wantAir;
-    if (y <= 62) return 0; // terrain fills with water below sea level
-    return wantAir;
-}
-
-static void shDungeonSet(void *vctx, int x, int y, int z, int kind) {
-    ShDungeonContext *c = (ShDungeonContext*)vctx;
-    if (y < 0 || y > 255) return;
-    int idx = shDungeonIdx(c, x, z);
-    if (idx < 0) return;
-    int cx = c->chunkXs[idx], cz = c->chunkZs[idx];
-    if (!c->dungeonDetails[idx]) c->dungeonDetails[idx] = (uint8_t*)calloc(1, 32768);
-    // chests/spawners stay when a later dungeon carves its interior over them
-    if (kind == 1 && shGetLakeDetail(c->dungeonDetails[idx], x, y, z, cx, cz) == 3) return;
-    shSetLakeDetail(c->dungeonDetails[idx], x, y, z, cx, cz, kind);
-    appendPos3List(kind == 1 ? &c->dungeonAirBySrc[c->ci] : &c->dungeonSolidBySrc[c->ci], (Pos3){x, y, z});
-}
-
 int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, StructureSaltConfig ssconf, int mc, uint64_t seed, int chunkX, int chunkZ, DungeonRoomList *dungeonsOut) {
     if (g && (mc < MC_1_14 || mc > MC_1_16_5)) // carver/lake/mineshaft/dungeon logic is different in 1.17+ and 1.13-
         return -1;
@@ -756,15 +560,18 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
     if (g) {
         int *chunkXs = (int*)malloc(nchunks * sizeof(int));
         int *chunkZs = (int*)malloc(nchunks * sizeof(int));
+        int *cellToIdx = (int*)malloc(nchunks * sizeof(int));
         int k = 0;
 
         for (int cxc = lcx0; cxc <= lcx1; ++cxc) {
-            for (int czc = lcz0; czc <= lcz1; ++czc) { 
-                chunkXs[k] = cxc << 4; chunkZs[k] = czc << 4; ++k; 
+            for (int czc = lcz0; czc <= lcz1; ++czc) {
+                chunkXs[k] = cxc << 4; chunkZs[k] = czc << 4;
+                cellToIdx[k] = k;
+                ++k;
             }
         }
 
-        ShCarverCache *cc = (ShCarverCache*)calloc(nchunks, sizeof(ShCarverCache));
+        DungeonCarverCache *cc = (DungeonCarverCache*)calloc(nchunks, sizeof(DungeonCarverCache));
         uint8_t **lakeDetails = (uint8_t**)calloc(nchunks, sizeof(uint8_t*));
 
         dungeonAirBySrc = (Pos3List*)malloc(nchunks * sizeof(Pos3List));
@@ -773,11 +580,13 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
             createPos3List(&dungeonAirBySrc[q], 4);
             createPos3List(&dungeonSolidBySrc[q], 4);
         }
-        ShDungeonContext dctx;
+        DungeonWorld dctx;
         dctx.g = g; dctx.sn = sn;
+        dctx.mc = mc; dctx.seed = seed;
         dctx.lcx0 = lcx0; dctx.lcz0 = lcz0;
         dctx.ncx = lcx1 - lcx0 + 1; dctx.ncz = lcz1 - lcz0 + 1;
         dctx.cc = cc; dctx.chunkXs = chunkXs; dctx.chunkZs = chunkZs;
+        dctx.cellToIdx = cellToIdx;
         dctx.lakeDetails = lakeDetails;
         dctx.dungeonDetails = (uint8_t**)calloc(nchunks, sizeof(uint8_t*));
         dctx.carverAirMask = (uint8_t**)calloc(nchunks, sizeof(uint8_t*));
@@ -787,43 +596,8 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
         dctx.dungeonAirBySrc = dungeonAirBySrc; dctx.dungeonSolidBySrc = dungeonSolidBySrc;
         dctx.pieces = list; dctx.pieceCount = count;
 
-        for (int ci = 0; ci < nchunks; ++ci) {
-            int cx = chunkXs[ci], cz = chunkZs[ci];
-            shCarveChunk(g, sn, &cc[ci], cx, cz);
-            Pos3List *ca[3][3], *cw[3][3]; const uint8_t *det[3][3]; int cellIdx[3][3];
-
-            for (int dz = 0; dz < 3; ++dz) {
-                for (int dx = 0; dx < 3; ++dx) {
-                    int sx = cx + (dx - 1) * 16, sz = cz + (dz - 1) * 16;
-                    int idx = -1;
-                    if (dx == 1 && dz == 1) idx = ci;
-                    else for (int q = 0; q < nchunks; ++q) if (chunkXs[q] == sx && chunkZs[q] == sz) { idx = q; break; }
-                    cellIdx[dz][dx] = idx;
-                    if (idx >= 0) {
-                        shCarveChunk(g, sn, &cc[idx], sx, sz);
-                        ca[dz][dx] = &cc[idx].air;
-                        cw[dz][dx] = &cc[idx].water;
-                        det[dz][dx] = idx < ci ? lakeDetails[idx] : NULL;
-                    } else { ca[dz][dx] = NULL; cw[dz][dx] = NULL; det[dz][dx] = NULL; }
-                }
-            }
-
-            static const int srcCell[4][2] = {{0,0},{0,1},{1,0},{1,1}}; // NW, W, N, self as [dx][dz]
-            int order[4];
-            for (int c = 0; c < 4; ++c) { int idx = cellIdx[srcCell[c][1]][srcCell[c][0]]; order[c] = (idx >= 0 && idx <= ci) ? idx : -1; }
-            Pos3List la, lw, ll; createPos3List(&la, 4); createPos3List(&lw, 4); createPos3List(&ll, 4);
-            applyAllLakes(g, sn, mc, seed, cx >> 4, cz >> 4, order, ca, cw, det, &la, &lw, &ll);
-            lakeDetails[ci] = (uint8_t*)calloc(1, 32768);
-            for (int i = 0; i < la.size; ++i) { shSetLakeDetail(lakeDetails[ci], la.pos3s[i].x, la.pos3s[i].y, la.pos3s[i].z, cx, cz, 1); appendPos3List(&lakeAirAll, la.pos3s[i]); }
-            for (int i = 0; i < lw.size; ++i) { shSetLakeDetail(lakeDetails[ci], lw.pos3s[i].x, lw.pos3s[i].y, lw.pos3s[i].z, cx, cz, 4); appendPos3List(&lakeWaterAll, lw.pos3s[i]); }
-            for (int i = 0; i < ll.size; ++i) shSetLakeDetail(lakeDetails[ci], ll.pos3s[i].x, ll.pos3s[i].y, ll.pos3s[i].z, cx, cz, 5);
-            freePos3List(&la); freePos3List(&lw); freePos3List(&ll);
-
-            dctx.ci = ci;
-            int dungeonBiome = getBiomeAt(g, 4, ((cx >> 4) << 2) + 2, 2, ((cz >> 4) << 2) + 2);
-            int fIdx = (dungeonBiome == desert || dungeonBiome == swamp) ? 3 : 2; // fossils shift the slot
-            simMonsterRooms(mc, seed, cx >> 4, cz >> 4, fIdx, shDungeonBlock, shDungeonSet, &dctx, dungeonsOut);
-        }
+        for (int ci = 0; ci < nchunks; ++ci)
+            dungeonSimChunk(&dctx, ci, &lakeAirAll, &lakeWaterAll, dungeonsOut);
 
         for (int q = 0; q < nchunks; ++q) {
             if (lakeDetails[q]) free(lakeDetails[q]);
@@ -842,6 +616,7 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
         free(lakeDetails);
         free(chunkXs);
         free(chunkZs);
+        free(cellToIdx);
     }
 
     // slow code ahead
@@ -860,8 +635,8 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
                     appendPos3List(&airList, lakeAirAll.pos3s[i]);
                 for (int i = 0; i < lakeWaterAll.size; ++i)
                     appendPos3List(&waterList, lakeWaterAll.pos3s[i]);
-                fillMaskSH(airMask, &airList, cx, cz);
-                fillMaskSH(waterMask, &waterList, cx, cz);
+                dungeonFillMask(airMask, &airList, cx, cz);
+                dungeonFillMask(waterMask, &waterList, cx, cz);
                 freePos3List(&airList);
                 freePos3List(&waterList);
 
@@ -877,8 +652,8 @@ int getStrongholdLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Struct
                     for (int i = 0; i < dungeonSolidBySrc[s].size; ++i)
                         appendPos3List(&dungeonSolidList, dungeonSolidBySrc[s].pos3s[i]);
                 }
-                fillMaskSH(dungeonAirMask, &dungeonAirList, cx, cz);
-                fillMaskSH(dungeonSolidMask, &dungeonSolidList, cx, cz);
+                dungeonFillMask(dungeonAirMask, &dungeonAirList, cx, cz);
+                dungeonFillMask(dungeonSolidMask, &dungeonSolidList, cx, cz);
                 freePos3List(&dungeonAirList);
                 freePos3List(&dungeonSolidList);
             } else {

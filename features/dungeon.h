@@ -31,7 +31,60 @@ void freeDungeonRoomList(DungeonRoomList *list);
 
 int simMonsterRooms(int mc, uint64_t worldSeed, int chunkX, int chunkZ, int featureIndex, DungeonBlockFxn getBlock, DungeonSetFxn setBlock, void *ctx, DungeonRoomList *roomsOut);
 
-// TODO add standalone function to find monster spawners (requries carvers and structures to be simmed first so itll probably be very slow)
+STRUCT(DungeonCarverCache) { Pos3List air, water; int valid; };
+
+STRUCT(DungeonWorld) {
+    Generator *g; SurfaceNoise *sn;
+    int mc; uint64_t seed;
+    int lcx0, lcz0, ncx, ncz, ci;
+    DungeonCarverCache *cc;
+    int *chunkXs, *chunkZs;
+    const int *cellToIdx; // conversion from xz chunk to decoration order
+    uint8_t **lakeDetails; // 1 is air, 2 is water, 3 is lava
+    uint8_t **dungeonDetails; // 1 is cave air, 2 is cobble, 3 is chest
+    uint8_t **carverAirMask, **carverWaterMask; // masks for carvers
+    uint8_t **mineshaftAirMask; // mask for mineshaft
+    const Pos3List *mineshaftAir;
+    Pos3List *dungeonAirBySrc, *dungeonSolidBySrc; // optional (pass NULL)
+    const Piece *pieces; int pieceCount; // stronghold pieces, optional
+};
+
+/**
+ * Fills the mask for dungeon data
+ */
+
+void dungeonFillMask(uint8_t *mask, const Pos3List *list, int cx, int cz);
+
+/**
+ * Decorates chunk ci as far as monster rooms are concerned: carvers,
+ * lakes (written to w->lakeDetails[ci] and optionally appended to
+ * lakeAirAll/lakeWaterAll), then the 8 monster room attempts
+ * Rooms placed in this chunk are appended to roomsOut (optional)
+ * Call once per chunk in decoration order
+ */
+
+int dungeonSimChunk(DungeonWorld *w, int ci, Pos3List *lakeAirAll, Pos3List *lakeWaterAll, DungeonRoomList *roomsOut);
+
+/**
+ * Finds the monster rooms (and their chest loot seeds) of a single chunk.
+ * The chunks around it are assumed to have decorated in radial order
+ * Nearby strongholds and mineshafts are detected and simulated automatically
+ *
+ * Warning: very slow (carvers + lakes for a 5x5 chunk window, plus full
+ * mineshaft/stronghold loot sim for any mineshaft/stronghold nearby)
+ *
+ * @param g the biome generator
+ * @param sn surface noise
+ * @param mc the minecraft version (MC_1_14 to MC_1_16_5)
+ * @param seed the world seed
+ * @param chunkX the chunk X-coordinate
+ * @param chunkZ the chunk Z-coordinate
+ * @param centerCX chunk X of the generation center
+ * @param centerCZ chunk Z of the generation center
+ * @param roomsOut rooms placed in the chunk, with chest positions and loot seeds
+ * @return the number of rooms placed in the chunk, or -1 for error
+ */
+int getDungeons(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunkX, int chunkZ, int centerCX, int centerCZ, DungeonRoomList *roomsOut);
 
 #ifdef __cplusplus
 }

@@ -86,6 +86,7 @@ set(HEADERS
 	loot/loot_tables/shipwreck_treasure_1_13.h
 	loot/loot_tables/shipwreck_treasure_1_20.h
 	loot/loot_tables/shipwreck_treasure_1_21_11.h
+	loot/loot_tables/simple_dungeon_1_14.h
 	loot/loot_tables/stronghold_corridor_1_13.h
 	loot/loot_tables/stronghold_corridor_1_18.h
 	loot/loot_tables/stronghold_corridor_1_20.h
@@ -164,6 +165,7 @@ set(SOURCES
 	loot/loot_tables/shipwreck_treasure_1_13.c
 	loot/loot_tables/shipwreck_treasure_1_20.c
 	loot/loot_tables/shipwreck_treasure_1_21_11.c
+	loot/loot_tables/simple_dungeon_1_14.c
 	loot/loot_tables/stronghold_corridor_1_13.c
 	loot/loot_tables/stronghold_corridor_1_18.c
 	loot/loot_tables/stronghold_corridor_1_20.c

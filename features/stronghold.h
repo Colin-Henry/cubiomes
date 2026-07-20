@@ -50,6 +50,7 @@ enum {
  * to p.additionalData using a bit array (e.g. 0b101011011100 would mean
  * 7 eyes are generated).
  *
+ * Warning: very slow
  * @param list the pieces list
  * @param n the maximum number of pieces to generate
  * @param ssconf the salt config, use getStructureSaltConfig to obtain it
