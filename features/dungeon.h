@@ -79,8 +79,8 @@ int dungeonSimChunk(DungeonWorld *w, int ci, Pos3List *lakeAirAll, Pos3List *lak
  * @param seed the world seed
  * @param chunkX the chunk X-coordinate
  * @param chunkZ the chunk Z-coordinate
- * @param centerCX chunk X of the generation center
- * @param centerCZ chunk Z of the generation center
+ * @param centerCX chunk X of the generation center (for simplicity its the same as chunkX)
+ * @param centerCZ chunk Z of the generation center (for simplicity its the same as chunkZ)
  * @param roomsOut rooms placed in the chunk, with chest positions and loot seeds
  * @return the number of rooms placed in the chunk, or -1 for error
  */

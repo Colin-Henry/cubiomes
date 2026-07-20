@@ -317,8 +317,14 @@ int dungeonSimChunk(DungeonWorld *w, int ci, Pos3List *lakeAirAll, Pos3List *lak
     Pos3List la, lw, ll; createPos3List(&la, 4); createPos3List(&lw, 4); createPos3List(&ll, 4);
     applyAllLakes(w->g, w->sn, w->mc, w->seed, cx >> 4, cz >> 4, order, ca, cw, det, &la, &lw, &ll);
     w->lakeDetails[ci] = (uint8_t*)calloc(1, 32768);
-    for (int i = 0; i < la.size; ++i) { setDetail(w->lakeDetails[ci], la.pos3s[i].x, la.pos3s[i].y, la.pos3s[i].z, cx, cz, 1); if (lakeAirAll) appendPos3List(lakeAirAll, la.pos3s[i]); }
-    for (int i = 0; i < lw.size; ++i) { setDetail(w->lakeDetails[ci], lw.pos3s[i].x, lw.pos3s[i].y, lw.pos3s[i].z, cx, cz, 4); if (lakeWaterAll) appendPos3List(lakeWaterAll, lw.pos3s[i]); }
+    for (int i = 0; i < la.size; ++i) { 
+        setDetail(w->lakeDetails[ci], la.pos3s[i].x, la.pos3s[i].y, la.pos3s[i].z, cx, cz, 1); 
+        if (lakeAirAll) appendPos3List(lakeAirAll, la.pos3s[i]); 
+    }
+    for (int i = 0; i < lw.size; ++i) { 
+        setDetail(w->lakeDetails[ci], lw.pos3s[i].x, lw.pos3s[i].y, lw.pos3s[i].z, cx, cz, 4); 
+        if (lakeWaterAll) appendPos3List(lakeWaterAll, lw.pos3s[i]); 
+    }
     for (int i = 0; i < ll.size; ++i) setDetail(w->lakeDetails[ci], ll.pos3s[i].x, ll.pos3s[i].y, ll.pos3s[i].z, cx, cz, 5);
     freePos3List(&la); freePos3List(&lw); freePos3List(&ll);
 
@@ -340,8 +346,9 @@ int getDungeons(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunk
         for (int cz = chunkZ - R; cz <= chunkZ + R; ++cz) {
             chunkXs[k] = cx << 4; chunkZs[k] = cz << 4; ++k;
         }
-    // stable sort by squared distance from the generation center = radial
-    // decoration order (row-major tie-break, same convention as mineshafts)
+
+    // stable sort by squared distance from the center
+
     for (int i = 1; i < NCHUNKS; ++i) {
         int xi = chunkXs[i], zi = chunkZs[i];
         long long dx = (xi >> 4) - centerCX, dz = (zi >> 4) - centerCZ;
@@ -405,16 +412,14 @@ int getDungeons(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunk
                 int n = getStrongholdPieces(buf, 400, mc, seed, sh.pos.x >> 4, sh.pos.z >> 4);
                 for (int i = 0; i < n; ++i) {
                     Piece *q = &buf[i];
-                    // +1: door checks peek one block past a piece face
                     if (q->bb1.x >= wx0 - 1 && q->bb0.x <= wx1 + 1 &&
-                        q->bb1.z >= wz0 - 1 && q->bb0.z <= wz1 + 1) {
+                        q->bb1.z >= wz0 - 1 && q->bb0.z <= wz1 + 1) { // door check goes one block past a piece face
                         shPieces = (Piece*)realloc(shPieces, (shCount + 1) * sizeof(Piece));
                         shPieces[shCount++] = *q;
                     }
                 }
             }
-            // rings only get farther out; stop once even a generous
-            // stronghold reach cannot touch the window anymore
+            // TODO add further rings
             if (sh.dist * 16 > tOriginDist + 2500) break;
         }
         free(buf);
