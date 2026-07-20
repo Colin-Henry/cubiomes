@@ -28,6 +28,7 @@ set(HEADERS
 	util.h
 	quadbase.h
 	xrms.h
+	features/piece.h
 	features/stronghold.h
 	features/mineshaft.h
 	loot/items.h
