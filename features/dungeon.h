@@ -72,9 +72,8 @@ int dungeonSimChunk(DungeonWorld *w, int ci, Pos3List *lakeAirAll, Pos3List *lak
  *
  * Warning: **very** slow (~50 ms/chunk) (carvers + lakes for a 5x5 chunk window, plus full
  * mineshaft/stronghold loot sim for any mineshaft/stronghold nearby)
- * It's recommended to use this function only to check if a specific chunk (or small set of chunks) has a dungeon
- * 
- * TODO optimize by considering the full area the user wants and simming all the chunks in order then check for dungeons
+ * Shuold only use this function for checking <100 chunks (10 x 10 chunk area)
+ * For more chunks use getDungeonsArea instead
  *
  * @param g the biome generator
  * @param sn surface noise
@@ -88,6 +87,34 @@ int dungeonSimChunk(DungeonWorld *w, int ci, Pos3List *lakeAirAll, Pos3List *lak
  * @return the number of rooms placed in the chunk, or -1 for error
  */
 int getDungeons(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunkX, int chunkZ, int centerCX, int centerCZ, DungeonRoomList *roomsOut);
+
+/**
+ * Same as getDungeons, but finds the monster rooms/chest loot seeds of every chunk
+ * in a large area much faster via sharing carver/lake/mineshaft/stronghold state
+ * across the whole area instead of recomputing it per chunk the way a loop
+ * of getDungeons calls would
+ *
+ * All rooms in the area are appended to one roomsOut list (rooms carry
+ * absolute world positions, so grouping by chunk afterwards is >> 4 if needed)
+ *
+ * Warning: still slow, and memory use grows with the area (a lake/dungeon
+ * detail buffer is kept per chunk, including a margin around the chunk)
+ * Fine for <1 million chunks (1000 x 1000 chunk area)
+ *
+ * @param g the biome generator
+ * @param sn surface noise
+ * @param mc the minecraft version (MC_1_14 to MC_1_16_5)
+ * @param seed the world seed
+ * @param chunkX1 1st chunk X-coordinate
+ * @param chunkZ1 1st chunk Z-coordinate
+ * @param chunkX2 2nd chunk X-coordinate
+ * @param chunkZ2 2nd chunk Z-coordinate
+ * @param centerCX center chunk X-coordinate (dungeons depend on generation order. Pass 0 if searching around 0,0)
+ * @param centerCZ center chunk X-coordinate (dungeons depend on generation order. Pass 0 if searching around 0,0)
+ * @param roomsOut rooms placed in the chunk, with chest positions and loot seeds
+ * @return the number of rooms placed in the chunk, or -1 for error
+ */
+int getDungeonsArea(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunkX1, int chunkZ1, int chunkX2, int chunkZ2, int centerCX, int centerCZ, DungeonRoomList *roomsOut);
 
 #ifdef __cplusplus
 }

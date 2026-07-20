@@ -334,22 +334,29 @@ int dungeonSimChunk(DungeonWorld *w, int ci, Pos3List *lakeAirAll, Pos3List *lak
     return simMonsterRooms(w->mc, w->seed, cx >> 4, cz >> 4, fIdx, worldBlock, worldSet, w, roomsOut);
 }
 
-int getDungeons(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunkX, int chunkZ, int centerCX, int centerCZ, DungeonRoomList *roomsOut) {
-    if (!g || !sn || mc < MC_1_14 || mc > MC_1_16_5) // carver/lake logic is different in 1.17+ and 1.13-
+int getDungeonsArea(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int cx0, int cz0, int cx1, int cz1, int centerCX, int centerCZ, DungeonRoomList *roomsOut) {
+    if (!g || !sn || mc < MC_1_14 || mc > MC_1_16_5 || cx0 > cx1 || cz0 > cz1) // carver/lake logic is different in 1.17+ and 1.13-
         return -1;
 
-    enum { R = 2, W = 2 * R + 1, NCHUNKS = W * W };
-    int chunkXs[NCHUNKS], chunkZs[NCHUNKS], cellToIdx[NCHUNKS];
+    enum { R = 2 }; // margin so every core chunk's own 3x3 (and getDungeons's validated 5x5) neighborhood is covered
+    int lcx0 = cx0 - R, lcz0 = cz0 - R;
+    int ncx = (cx1 - cx0 + 1) + 2 * R, ncz = (cz1 - cz0 + 1) + 2 * R;
+    int nchunks = ncx * ncz;
+
+    int *chunkXs = (int*)malloc(nchunks * sizeof(int));
+    int *chunkZs = (int*)malloc(nchunks * sizeof(int));
+    int *cellToIdx = (int*)malloc(nchunks * sizeof(int));
+    int *isCore = (int*)malloc(nchunks * sizeof(int));
 
     int k = 0;
-    for (int cx = chunkX - R; cx <= chunkX + R; ++cx)
-        for (int cz = chunkZ - R; cz <= chunkZ + R; ++cz) {
+    for (int cx = lcx0; cx < lcx0 + ncx; ++cx)
+        for (int cz = lcz0; cz < lcz0 + ncz; ++cz) {
             chunkXs[k] = cx << 4; chunkZs[k] = cz << 4; ++k;
         }
 
     // stable sort by squared distance from the center
 
-    for (int i = 1; i < NCHUNKS; ++i) {
+    for (int i = 1; i < nchunks; ++i) {
         int xi = chunkXs[i], zi = chunkZs[i];
         long long dx = (xi >> 4) - centerCX, dz = (zi >> 4) - centerCZ;
         long long di = dx * dx + dz * dz;
@@ -362,23 +369,25 @@ int getDungeons(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunk
         }
         chunkXs[j + 1] = xi; chunkZs[j + 1] = zi;
     }
-    int targetRank = -1;
-    for (int i = 0; i < NCHUNKS; ++i) {
-        int cxi = (chunkXs[i] >> 4) - (chunkX - R), czi = (chunkZs[i] >> 4) - (chunkZ - R);
-        cellToIdx[cxi * W + czi] = i;
-        if (chunkXs[i] == chunkX << 4 && chunkZs[i] == chunkZ << 4) targetRank = i;
+    int maxCoreRank = -1;
+    for (int i = 0; i < nchunks; ++i) {
+        int cxi = (chunkXs[i] >> 4) - lcx0, czi = (chunkZs[i] >> 4) - lcz0;
+        cellToIdx[cxi * ncz + czi] = i;
+        int cx = chunkXs[i] >> 4, cz = chunkZs[i] >> 4;
+        isCore[i] = cx >= cx0 && cx <= cx1 && cz >= cz0 && cz <= cz1;
+        if (isCore[i] && i > maxCoreRank) maxCoreRank = i;
     }
 
-    int wx0 = (chunkX - R) << 4, wz0 = (chunkZ - R) << 4;
-    int wx1 = ((chunkX + R) << 4) + 15, wz1 = ((chunkZ + R) << 4) + 15;
+    int wx0 = lcx0 << 4, wz0 = lcz0 << 4;
+    int wx1 = ((lcx0 + ncx - 1) << 4) + 15, wz1 = ((lcz0 + ncz - 1) << 4) + 15;
 
     Pos3List mineshaftAir;
     createPos3List(&mineshaftAir, 64);
     {
         Piece *msPieces = (Piece*)malloc(2048 * sizeof(Piece));
         Piece *msLoot = (Piece*)malloc(2048 * sizeof(Piece));
-        for (int rx = chunkX - R - 8; rx <= chunkX + R + 8; ++rx) {
-            for (int rz = chunkZ - R - 8; rz <= chunkZ + R + 8; ++rz) {
+        for (int rx = lcx0 - 8; rx <= lcx0 + ncx - 1 + 8; ++rx) {
+            for (int rz = lcz0 - 8; rz <= lcz0 + ncz - 1 + 8; ++rz) {
                 Pos mp;
                 if (!getStructurePos(Mineshaft, mc, seed, rx, rz, &mp)) continue;
                 if (!isViableStructurePos(Mineshaft, g, mp.x, mp.z, 0)) continue;
@@ -402,12 +411,21 @@ int getDungeons(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunk
     Piece *shPieces = NULL;
     int shCount = 0;
     {
-        double tOriginDist = sqrt((double)(chunkX * chunkX + chunkZ * chunkZ)) * 16;
+        // safe upper bound on how far stronghold rings must be walked: the
+        // window corner farthest from the world origin, plus slack below
+        double tOriginDist = 0;
+        for (int a = 0; a < 2; ++a) for (int b = 0; b < 2; ++b) {
+            double wx = a ? wx1 : wx0, wz = b ? wz1 : wz0;
+            double d = sqrt(wx * wx + wz * wz);
+            if (d > tOriginDist) tOriginDist = d;
+        }
         Piece *buf = (Piece*)malloc(400 * sizeof(Piece));
         StrongholdIter sh;
         initFirstStronghold(&sh, mc, seed);
         while (nextStronghold(&sh, g) > 0) {
-            long long dx = sh.pos.x - ((chunkX << 4) + 8), dz = sh.pos.z - ((chunkZ << 4) + 8);
+            int nx = sh.pos.x < wx0 ? wx0 : (sh.pos.x > wx1 ? wx1 : sh.pos.x); // nearest point in the window
+            int nz = sh.pos.z < wz0 ? wz0 : (sh.pos.z > wz1 ? wz1 : sh.pos.z);
+            long long dx = sh.pos.x - nx, dz = sh.pos.z - nz;
             if (dx * dx + dz * dz <= 300LL * 300LL) {
                 int n = getStrongholdPieces(buf, 400, mc, seed, sh.pos.x >> 4, sh.pos.z >> 4);
                 for (int i = 0; i < n; ++i) {
@@ -425,30 +443,34 @@ int getDungeons(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunk
         free(buf);
     }
 
-    DungeonCarverCache *cc = (DungeonCarverCache*)calloc(NCHUNKS, sizeof(DungeonCarverCache));
-    uint8_t **lakeDetails = (uint8_t**)calloc(NCHUNKS, sizeof(uint8_t*));
+    DungeonCarverCache *cc = (DungeonCarverCache*)calloc(nchunks, sizeof(DungeonCarverCache));
+    uint8_t **lakeDetails = (uint8_t**)calloc(nchunks, sizeof(uint8_t*));
 
     DungeonWorld w;
     w.g = g; w.sn = sn;
     w.mc = mc; w.seed = seed;
-    w.lcx0 = chunkX - R; w.lcz0 = chunkZ - R;
-    w.ncx = W; w.ncz = W;
+    w.lcx0 = lcx0; w.lcz0 = lcz0;
+    w.ncx = ncx; w.ncz = ncz;
     w.cc = cc; w.chunkXs = chunkXs; w.chunkZs = chunkZs;
     w.cellToIdx = cellToIdx;
     w.lakeDetails = lakeDetails;
-    w.dungeonDetails = (uint8_t**)calloc(NCHUNKS, sizeof(uint8_t*));
-    w.carverAirMask = (uint8_t**)calloc(NCHUNKS, sizeof(uint8_t*));
-    w.carverWaterMask = (uint8_t**)calloc(NCHUNKS, sizeof(uint8_t*));
-    w.mineshaftAirMask = (uint8_t**)calloc(NCHUNKS, sizeof(uint8_t*));
+    w.dungeonDetails = (uint8_t**)calloc(nchunks, sizeof(uint8_t*));
+    w.carverAirMask = (uint8_t**)calloc(nchunks, sizeof(uint8_t*));
+    w.carverWaterMask = (uint8_t**)calloc(nchunks, sizeof(uint8_t*));
+    w.mineshaftAirMask = (uint8_t**)calloc(nchunks, sizeof(uint8_t*));
     w.mineshaftAir = &mineshaftAir;
     w.dungeonAirBySrc = NULL; w.dungeonSolidBySrc = NULL;
     w.pieces = shPieces; w.pieceCount = shCount;
 
     int placed = 0;
-    for (int ci = 0; ci <= targetRank; ++ci)
-        placed = dungeonSimChunk(&w, ci, NULL, NULL, ci == targetRank ? roomsOut : NULL);
+    for (int ci = 0; ci <= maxCoreRank; ++ci) {
+        if (isCore[ci])
+            placed += dungeonSimChunk(&w, ci, NULL, NULL, roomsOut);
+        else
+            dungeonSimChunk(&w, ci, NULL, NULL, NULL);
+    }
 
-    for (int q = 0; q < NCHUNKS; ++q) {
+    for (int q = 0; q < nchunks; ++q) {
         if (lakeDetails[q]) free(lakeDetails[q]);
         if (cc[q].valid) { freePos3List(&cc[q].air); freePos3List(&cc[q].water); }
         if (w.dungeonDetails[q]) free(w.dungeonDetails[q]);
@@ -463,6 +485,14 @@ int getDungeons(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunk
     free(cc);
     free(lakeDetails);
     free(shPieces);
+    free(chunkXs);
+    free(chunkZs);
+    free(cellToIdx);
+    free(isCore);
     freePos3List(&mineshaftAir);
     return placed;
+}
+
+int getDungeons(Generator *g, SurfaceNoise *sn, int mc, uint64_t seed, int chunkX, int chunkZ, int centerCX, int centerCZ, DungeonRoomList *roomsOut) {
+    return getDungeonsArea(g, sn, mc, seed, chunkX, chunkZ, chunkX, chunkZ, centerCX, centerCZ, roomsOut);
 }
