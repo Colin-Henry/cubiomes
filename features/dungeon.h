@@ -70,8 +70,11 @@ int dungeonSimChunk(DungeonWorld *w, int ci, Pos3List *lakeAirAll, Pos3List *lak
  * The chunks around it are assumed to have decorated in radial order
  * Nearby strongholds and mineshafts are detected and simulated automatically
  *
- * Warning: very slow (carvers + lakes for a 5x5 chunk window, plus full
+ * Warning: **very** slow (~50 ms/chunk) (carvers + lakes for a 5x5 chunk window, plus full
  * mineshaft/stronghold loot sim for any mineshaft/stronghold nearby)
+ * It's recommended to use this function only to check if a specific chunk (or small set of chunks) has a dungeon
+ * 
+ * TODO optimize by considering the full area the user wants and simming all the chunks in order then check for dungeons
  *
  * @param g the biome generator
  * @param sn surface noise
@@ -79,8 +82,8 @@ int dungeonSimChunk(DungeonWorld *w, int ci, Pos3List *lakeAirAll, Pos3List *lak
  * @param seed the world seed
  * @param chunkX the chunk X-coordinate
  * @param chunkZ the chunk Z-coordinate
- * @param centerCX chunk X of the generation center (for simplicity its the same as chunkX)
- * @param centerCZ chunk Z of the generation center (for simplicity its the same as chunkZ)
+ * @param centerCX chunk X of the generation center (generally pass the same as chunkX)
+ * @param centerCZ chunk Z of the generation center (generally pass the same as chunkX)
  * @param roomsOut rooms placed in the chunk, with chest positions and loot seeds
  * @return the number of rooms placed in the chunk, or -1 for error
  */
