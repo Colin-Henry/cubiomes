@@ -4225,7 +4225,6 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
                 case savanna_plateau:
                 case shattered_savanna:             // windswept_savanna
                 case shattered_savanna_plateau:
-                case badlands:
                 case eroded_badlands:
                 case wooded_badlands_plateau:       // wooded_badlands
                 case modified_badlands_plateau:
@@ -4238,7 +4237,13 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
                 case jagged_peaks:
                 case stony_peaks:
                 case snowy_slopes:
+                case snowy_mountains:               // removed in 1.18
+                case badlands_plateau:              // merged into badlands in 1.18
                     r->biome = mountains;
+                    break;
+                case badlands:
+                    if (mc >= MC_1_18)
+                        r->biome = mountains;
                     break;
                 }
             }
@@ -4292,34 +4297,37 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
             }
         }
 
-        Pos rpPivotPos = {sx / 2, sz / 2};
-        Pos rpStartPos;
-        switch (r->rotation) { // 0:0, 1:cw90, 2:cw180, 3:cw270=ccw90
-        case 0: rpStartPos = (Pos) {0, 0}; break;
-        case 1: rpStartPos = (Pos) {rpPivotPos.x + rpPivotPos.z, rpPivotPos.z - rpPivotPos.x}; break;
-        case 2: rpStartPos = (Pos) {rpPivotPos.x + rpPivotPos.x, rpPivotPos.z + rpPivotPos.z}; break;
-        case 3: rpStartPos = (Pos) {rpPivotPos.x - rpPivotPos.z, rpPivotPos.x + rpPivotPos.z}; break;
-        default: UNREACHABLE();
+        // StructureTemplate.transform() applied to the four footprint corners,
+        // which gives the same box as StructureTemplate.getBoundingBox().
+        {
+            int px = sx / 2, pz = sz / 2;
+            int bx0 = INT_MAX, bx1 = INT_MIN;
+            int bz0 = INT_MAX, bz1 = INT_MIN;
+            int i;
+            for (i = 0; i < 4; i++)
+            {
+                int lx = (i & 1) ? sx - 1 : 0;
+                int lz = (i & 2) ? sz - 1 : 0;
+                int tx, tz;
+                if (r->mirror)
+                    lx = -lx;
+                switch (r->rotation) { // 0:0, 1:cw90, 2:cw180, 3:cw270=ccw90
+                case 1:  tx = px + pz - lz; tz = pz - px + lx; break;
+                case 2:  tx = px + px - lx; tz = pz + pz - lz; break;
+                case 3:  tx = px - pz + lz; tz = px + pz - lx; break;
+                default: tx = lx;           tz = lz;           break;
+                }
+                if (tx < bx0) bx0 = tx;
+                if (tx > bx1) bx1 = tx;
+                if (tz < bz0) bz0 = tz;
+                if (tz > bz1) bz1 = tz;
+            }
+            r->x = bx0;
+            r->z = bz0;
+            r->sx = bx1 - bx0 + 1;
+            r->sz = bz1 - bz0 + 1;
+            r->sy = sy;
         }
-
-        Pos3 rpSize = {sx, sy, sz};
-        int rpMirX = rpSize.x;
-        if (r->mirror) {
-            rpMirX = -rpMirX;
-        }
-        Pos3 rpEndPos;
-        switch (r->rotation) { // 0:0, 1:cw90, 2:cw180, 3:cw270=ccw90
-        case 0: rpEndPos = (Pos3) {rpMirX, rpSize.y, rpSize.z}; break;
-        case 1: rpEndPos = (Pos3) {rpStartPos.x - rpSize.z, rpSize.y, rpStartPos.z + rpMirX}; break;
-        case 2: rpEndPos = (Pos3) {rpStartPos.x - rpMirX, rpSize.y, rpStartPos.z - rpSize.z}; break;
-        case 3: rpEndPos = (Pos3) {rpStartPos.x + rpSize.z, rpSize.y, rpStartPos.z - rpMirX}; break;
-        default: UNREACHABLE();
-        }
-
-        r->x = rpStartPos.x;
-        r->z = rpStartPos.z;
-        r->sx = rpEndPos.x - rpStartPos.x;
-        r->sz = rpEndPos.z - rpStartPos.z;
         return 1;
 
     case Monument:
@@ -5085,15 +5093,16 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
     }
     case Ruined_Portal:
     case Ruined_Portal_N: {
-        // chest generates roughly in the same chunk as centre of the template
-        minBlockX = (posX + sv->x + sv->sx / 2) & ~15;
-        minBlockZ = (posZ + sv->z + sv->sz / 2) & ~15;
+        // RuinedPortalPiece.postProcess returns early unless the chunk being
+        // decorated contains templatePosition, so the whole portal - chest
+        // included - is placed from the structure's own chunk, wherever in the
+        // template the chest happens to land. minBlockX/Z are already that.
         Piece* p = list;
         p->name = "RUPO";
         p->pos = (Pos3) {minBlockX, 0, minBlockZ};
         p->lootTables[0] = "ruined_portal";
-        // rough estimate
-        p->chestPoses[0] = (Pos) {minBlockX, minBlockZ};
+        // only an estimate; features/ruined_portal.h resolves the real position
+        p->chestPoses[0] = (Pos) {posX + sv->x + sv->sx / 2, posZ + sv->z + sv->sz / 2};
         break;
     }
     default: // unsupported structures

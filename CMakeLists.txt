@@ -30,6 +30,7 @@ set(HEADERS
 	xrms.h
 	features/stronghold.h
 	features/mineshaft.h
+	features/ruined_portal.h
 	jigsaw/jigsaw.h
 	jigsaw/jigsaw_data.h
 	jigsaw/jigsaw_1_16_1.h
@@ -143,6 +144,7 @@ set(SOURCES
 	features/stronghold.c
 	features/mineshaft.c
 	features/dungeon.c
+	features/ruined_portal.c
 	jigsaw/jigsaw.c
 	jigsaw/jigsaw_1_16_1.c
 	jigsaw/jigsaw_1_16_5.c
