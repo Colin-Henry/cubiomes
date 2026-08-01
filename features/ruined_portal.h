@@ -96,6 +96,19 @@ int isRuinedPortalCompletable(const Generator *g, const SurfaceNoise *sn, LootTa
 // determines if the block is crying obsidian (its only based on world coordinates)
 int isCryingObsidian(int x, int y, int z);
 
+STRUCT(RuinedPortalTemplate)
+{
+    const char *name;
+    int planeX;
+    int fy0, fy1, fz0, fz1;     // frame rectangle, corners included
+    int nObs, nGap;
+    int obs[RP_MAX_FRAME_CELLS][2];     // {y, z}
+    int gap[RP_MAX_FRAME_CELLS][2];
+};
+
+// fills "out" with template "idx" (0..12), returns 0 when idx is out of range
+int getRuinedPortalTemplate(RuinedPortalTemplate *out, int idx);
+
 #ifdef __cplusplus
 }
 #endif

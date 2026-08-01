@@ -391,6 +391,37 @@ static int rpResolve(RuinedPortal *out, const Generator *g, const SurfaceNoise *
     return RP_OK;
 }
 
+int getRuinedPortalTemplate(RuinedPortalTemplate *out, int idx)
+{
+    const RPTemplate *t;
+    int i;
+
+    if (idx < 0 || idx >= 13)
+        return 0;
+    t = &g_rp_templates[idx];
+
+    memset(out, 0, sizeof(*out));
+    out->name   = t->name;
+    out->planeX = t->planeX;
+    out->fy0    = t->fy0;
+    out->fy1    = t->fy1;
+    out->fz0    = t->fz0;
+    out->fz1    = t->fz1;
+    out->nObs   = t->nObs;
+    out->nGap   = t->nGap;
+    for (i = 0; i < t->nObs; i++)
+    {
+        out->obs[i][0] = t->obs[i].y;
+        out->obs[i][1] = t->obs[i].z;
+    }
+    for (i = 0; i < t->nGap; i++)
+    {
+        out->gap[i][0] = t->gap[i].y;
+        out->gap[i][1] = t->gap[i].z;
+    }
+    return 1;
+}
+
 int getRuinedPortal(RuinedPortal *out, const Generator *g, const SurfaceNoise *sn,
         LootTableContext *loot, int x, int z)
 {
