@@ -4035,9 +4035,17 @@ static piecefunc_t genFatTower;
 int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
         int x, int z, int biomeID)
 {
+    return getVariantRnd(r, structType, mc, seed, x, z, biomeID, NULL);
+}
+
+int getVariantRnd(StructureVariant *r, int structType, int mc, uint64_t seed,
+        int x, int z, int biomeID, uint64_t *rngOut)
+{
     int t;
     char sx, sy, sz;
-    uint64_t rng = chunkGenerateRnd(seed, x >> 4, z >> 4);
+    uint64_t rngLocal;
+    uint64_t *rngp = rngOut ? rngOut : &rngLocal;
+    *rngp = chunkGenerateRnd(seed, x >> 4, z >> 4);
 
     memset(r, 0, sizeof(*r));
     r->start = -1;
@@ -4053,19 +4061,19 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
             return 0;
         if (mc <= MC_1_13)
         {
-            skipNextN(&rng, mc == MC_1_13 ? 10 : 11);
-            r->abandoned = nextInt(&rng, 50) == 0;
+            skipNextN(rngp, mc == MC_1_13 ? 10 : 11);
+            r->abandoned = nextInt(rngp, 50) == 0;
             return 1;
         }
         r->biome = biomeID;
-        r->rotation = nextInt(&rng, 4);
+        r->rotation = nextInt(rngp, 4);
         switch (biomeID)
         {
         case meadow:
             r->biome = plains;
             // fallthrough
         case plains:
-            t = nextInt(&rng, 204);
+            t = nextInt(rngp, 204);
             if      (t <  50) { r->start = 0; sx =  9; sy = 4; sz =  9; } // plains_fountain_01
             else if (t < 100) { r->start = 1; sx = 10; sy = 7; sz = 10; } // plains_meeting_point_1
             else if (t < 150) { r->start = 2; sx =  8; sy = 5; sz = 15; } // plains_meeting_point_2
@@ -4077,7 +4085,7 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
             else UNREACHABLE();
             break;
         case desert:
-            t = nextInt(&rng, 250);
+            t = nextInt(rngp, 250);
             if      (t <  98) { r->start = 1; sx = 17; sy = 6; sz =  9; } // desert_meeting_point_1
             else if (t < 196) { r->start = 2; sx = 12; sy = 6; sz = 12; } // desert_meeting_point_2
             else if (t < 245) { r->start = 3; sx = 15; sy = 6; sz = 15; } // desert_meeting_point_3
@@ -4087,7 +4095,7 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
             else UNREACHABLE();
             break;
         case savanna:
-            t = nextInt(&rng, 459);
+            t = nextInt(rngp, 459);
             if      (t < 100) { r->start = 1; sx = 14; sy = 5; sz = 12; } // savanna_meeting_point_1
             else if (t < 150) { r->start = 2; sx = 11; sy = 6; sz = 11; } // savanna_meeting_point_2
             else if (t < 300) { r->start = 3; sx =  9; sy = 6; sz = 11; } // savanna_meeting_point_3
@@ -4099,7 +4107,7 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
             else UNREACHABLE();
             break;
         case taiga:
-            t = nextInt(&rng, 100);
+            t = nextInt(rngp, 100);
             if      (t <  49) { r->start = 1; sx = 22; sy = 3; sz = 18; } // taiga_meeting_point_1
             else if (t <  98) { r->start = 2; sx =  9; sy = 7; sz =  9; } // taiga_meeting_point_2
             else if (t <  99) { r->start = 1; sx = 22; sy = 3; sz = 18; r->abandoned = 1; }
@@ -4107,7 +4115,7 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
             else UNREACHABLE();
             break;
         case snowy_tundra:
-            t = nextInt(&rng, 306);
+            t = nextInt(rngp, 306);
             if      (t < 100) { r->start = 1; sx = 12; sy = 8; sz =  8; } // snowy_meeting_point_1
             else if (t < 150) { r->start = 2; sx = 11; sy = 5; sz =  9; } // snowy_meeting_point_2
             else if (t < 300) { r->start = 3; sx =  7; sy = 7; sz =  7; } // snowy_meeting_point_3
@@ -4123,8 +4131,8 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
         goto L_rotate_village_bastion;
 
     case Bastion:
-        r->rotation = nextInt(&rng, 4);
-        r->start = nextInt(&rng, 4);
+        r->rotation = nextInt(rngp, 4);
+        r->start = nextInt(rngp, 4);
         if (mc == MC_1_16_1)
         {   // swapped in 1.16.1 only
             uint8_t tmp = r->start;
@@ -4163,8 +4171,8 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
         return 1;
 
     case Ancient_City:
-        r->rotation = nextInt(&rng, 4);
-        r->start = 1 + nextInt(&rng, 3); // city_center_1..3
+        r->rotation = nextInt(rngp, 4);
+        r->start = 1 + nextInt(rngp, 3); // city_center_1..3
         sx = 18; sy = 31; sz = 41;
         switch (r->rotation)
         { // 0:0, 1:cw90, 2:cw180, 3:cw270=ccw90
@@ -4251,28 +4259,28 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
                 r->biome = plains;
             if (r->biome == plains || r->biome == mountains)
             {
-                r->underground = nextFloat(&rng) < 0.5f;
+                r->underground = nextFloat(rngp) < 0.5f;
                 if (r->underground)
                     r->airpocket = 1;
                 else
-                    r->airpocket = nextFloat(&rng) < 0.5f;
+                    r->airpocket = nextFloat(rngp) < 0.5f;
             }
             else if (r->biome == jungle)
             {
-                r->airpocket = nextFloat(&rng) < 0.5f;
+                r->airpocket = nextFloat(rngp) < 0.5f;
             }
         }
-        r->giant = nextFloat(&rng) < 0.05f;
+        r->giant = nextFloat(rngp) < 0.05f;
         if (r->giant)
         {   // ruined_portal/giant_portal_1..3
-            r->start = 1 + nextInt(&rng, 3);
+            r->start = 1 + nextInt(rngp, 3);
         }
         else
         {   // ruined_portal/portal_1..10
-            r->start = 1 + nextInt(&rng, 10);
+            r->start = 1 + nextInt(rngp, 10);
         }
-        r->rotation = nextInt(&rng, 4);
-        r->mirror = nextFloat(&rng) >= 0.5f;
+        r->rotation = nextInt(rngp, 4);
+        r->mirror = nextFloat(rngp) >= 0.5f;
 
         if (r->giant) {
             switch (r->start) {
@@ -4306,21 +4314,12 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
             int i;
             for (i = 0; i < 4; i++)
             {
-                int lx = (i & 1) ? sx - 1 : 0;
-                int lz = (i & 2) ? sz - 1 : 0;
-                int tx, tz;
-                if (r->mirror)
-                    lx = -lx;
-                switch (r->rotation) { // 0:0, 1:cw90, 2:cw180, 3:cw270=ccw90
-                case 1:  tx = px + pz - lz; tz = pz - px + lx; break;
-                case 2:  tx = px + px - lx; tz = pz + pz - lz; break;
-                case 3:  tx = px - pz + lz; tz = px + pz - lx; break;
-                default: tx = lx;           tz = lz;           break;
-                }
-                if (tx < bx0) bx0 = tx;
-                if (tx > bx1) bx1 = tx;
-                if (tz < bz0) bz0 = tz;
-                if (tz > bz1) bz1 = tz;
+                Pos3 tp = templateTransform((i & 1) ? sx - 1 : 0, 0,
+                        (i & 2) ? sz - 1 : 0, r->mirror, r->rotation, px, pz);
+                if (tp.x < bx0) bx0 = tp.x;
+                if (tp.x > bx1) bx1 = tp.x;
+                if (tp.z < bz0) bz0 = tp.z;
+                if (tp.z > bz1) bz1 = tp.z;
             }
             r->x = bx0;
             r->z = bz0;
@@ -4338,11 +4337,11 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
     case Igloo:
         if (mc <= MC_1_12)
         {
-            setSeed(&rng, getPopulationSeed(mc, seed, (x>>4) - 1, (z>>4) - 1));
+            setSeed(rngp, getPopulationSeed(mc, seed, (x>>4) - 1, (z>>4) - 1));
         }
-        r->rotation = nextInt(&rng, 4);
-        r->basement = nextDouble(&rng) < 0.5;
-        r->size = nextInt(&rng, 8) + 4;
+        r->rotation = nextInt(rngp, 4);
+        r->basement = nextDouble(rngp) < 0.5;
+        r->size = nextInt(rngp, 8) + 4;
         sx = 7; sy = 5; sz = 8;
         r->sy = sy;
         switch (r->rotation)
@@ -4355,12 +4354,12 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
         return 1;
     case Shipwreck:
         r->biome = biomeID; // to determine isBeached
-        r->rotation = nextInt(&rng, 4); // NONE, CLOCKWISE_90, CLOCKWISE_180, COUNTERCLOCKWISE_90
+        r->rotation = nextInt(rngp, 4); // NONE, CLOCKWISE_90, CLOCKWISE_180, COUNTERCLOCKWISE_90
         int isBeached = !isOceanic(r->biome);
         if (isBeached) {
-            r->start = nextInt(&rng, 11);
+            r->start = nextInt(rngp, 11);
         } else {
-            r->start = nextInt(&rng, 20);
+            r->start = nextInt(rngp, 20);
         }
         Pos swPivotPos = {4, 15};
         Pos swStartPos;
@@ -4375,7 +4374,7 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
         r->z = swStartPos.z;
         return 1;
     case Outpost:
-        r->rotation = nextInt(&rng, 4); // NONE, CLOCKWISE_90, CLOCKWISE_180, COUNTERCLOCKWISE_90
+        r->rotation = nextInt(rngp, 4); // NONE, CLOCKWISE_90, CLOCKWISE_180, COUNTERCLOCKWISE_90
         return 1;
     case Desert_Pyramid:
         sx = 21; sy = 15; sz = 21;
@@ -4392,7 +4391,7 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
             r->sx = sx; r->sz = sz;
             return 1;
         }
-        switch (nextInt(&rng, 4))
+        switch (nextInt(rngp, 4))
         { // orientation: 0:north, 1:east, 2:south, 3:west
         case 0: r->rotation = 0; r->mirror = 0; r->sx = sx; r->sz = sz; break;
         case 1: r->rotation = 1; r->mirror = 0; r->sx = sz; r->sz = sx; break;
@@ -4426,25 +4425,25 @@ int getVariant(StructureVariant *r, int structType, int mc, uint64_t seed,
         {
             StructureConfig sc;
             getStructureConfig(Geode, mc, &sc);
-            setSeed(&rng, getPopulationSeed(mc, seed, x&~15, z&~15) + sc.salt);
-            if (nextFloat(&rng) >= sc.rarity) // rarity chance
+            setSeed(rngp, getPopulationSeed(mc, seed, x&~15, z&~15) + sc.salt);
+            if (nextFloat(rngp) >= sc.rarity) // rarity chance
                 return 0;
-            r->x = nextInt(&rng, 16); // chunk offset X
-            r->z = nextInt(&rng, 16); // chunk offset Z
+            r->x = nextInt(rngp, 16); // chunk offset X
+            r->z = nextInt(rngp, 16); // chunk offset Z
             r->x -= x & 15;
             r->z -= z & 15;
-            r->y = nextInt(&rng, 1+46-6) + 6; // Y-level
-            r->size = nextInt(&rng, 2) + 3;
-            skipNextN(&rng, 2);
-            r->cracked = nextFloat(&rng) < 0.95;
+            r->y = nextInt(rngp, 1+46-6) + 6; // Y-level
+            r->size = nextInt(rngp, 2) + 3;
+            skipNextN(rngp, 2);
+            r->cracked = nextFloat(rngp) < 0.95;
             r->x += 5; r->y += 5; r->z += 5;
         }
         return 1;
 
     case Trial_Chambers:
-        r->y = nextInt(&rng, 1+20) + -40; // Y-level
-        r->rotation = nextInt(&rng, 4);
-        r->start = nextInt(&rng, 2); // corridor/end_[12]
+        r->y = nextInt(rngp, 1+20) + -40; // Y-level
+        r->rotation = nextInt(rngp, 4);
+        r->start = nextInt(rngp, 2); // corridor/end_[12]
         r->sx = 19; r->sy = 20; r->sz = 19;
         //r->y += -1; // groundLevelData
         switch (r->rotation)

@@ -895,11 +895,32 @@ uint64_t chunkGenerateRnd(uint64_t worldSeed, int chunkX, int chunkZ)
     return rnd;
 }
 
+/* Mirror across x, then rotate about the template pivot (px, pz)
+ * Used for both the footprint corners that give a
+ * template's bounding box and for individual blocks inside it.
+ */
+static inline Pos3 templateTransform(int x, int y, int z, int mirror,
+        int rotation, int px, int pz)
+{
+    if (mirror)
+        x = -x;
+    switch (rotation) { // 0:0, 1:cw90, 2:cw180, 3:cw270=ccw90
+    case 1:  return (Pos3) {px + pz - z, y, pz - px + x};
+    case 2:  return (Pos3) {px + px - x, y, pz + pz - z};
+    case 3:  return (Pos3) {px - pz + z, y, px + pz - x};
+    default: return (Pos3) {x, y, z};
+    }
+}
+
 /* Get data, such as rotation and bounding box of a structure instance.
  * (Supports only some structure types.)
  */
 int getVariant(StructureVariant *sv, int structType, int mc, uint64_t seed,
         int blockX, int blockZ, int biomeID);
+
+// Idnetical to getVariant but used for ruined portals when the rng stream is still needed
+int getVariantRnd(StructureVariant *sv, int structType, int mc, uint64_t seed,
+        int blockX, int blockZ, int biomeID, uint64_t *rngOut);
 
 /**
  * Get the distinct loot table count for chests in the structure.

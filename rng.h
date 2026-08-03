@@ -344,12 +344,18 @@ static inline int xNextIntJBetween(Xoroshiro *xr, const int min, const int max)
     return xNextIntJ(xr, max - min + 1) + min;
 }
 
+static inline int64_t mcBlockSeed(int x, int y, int z)
+{
+    uint64_t l = (uint64_t)(int64_t)(int32_t)((uint32_t)x * 3129871u)
+               ^ (uint64_t)((int64_t)z * 116129781LL)
+               ^ (uint64_t)(int64_t)y;
+    l = l * l * 42317861ULL + l * 11ULL;
+    return (int64_t)l >> 16;
+}
+
 static inline Xoroshiro xAtPos(Xoroshiro *xr, int x, int y, int z)
 {
-    int64_t l = (int64_t)(x * 3129871) ^ (int64_t)z * 116129781L ^ (int64_t)y;
-    l = l * l * 42317861L + l * 11L;
-    l >>= 16;
-
+    int64_t l = mcBlockSeed(x, y, z);
     return (Xoroshiro) {(uint64_t)l ^ xr->lo, xr->hi};
 }
 

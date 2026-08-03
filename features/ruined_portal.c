@@ -69,66 +69,11 @@ static const RPTemplate g_rp_templates[13] =
 };
 
 
-static int rpPortalType(int mc, int biomeID)
-{
-    switch (getCategory(mc, biomeID))
-    {
-    case desert:        return desert;
-    case jungle:        return jungle;
-    case swamp:         return swamp;
-    case ocean:         return ocean;
-    case nether_wastes: return nether_wastes;
-    default: break;
-    }
-    switch (biomeID)
-    {
-    case mountains:                         // 3
-    case snowy_mountains:                   // 13
-    case mountain_edge:                     // 20
-    case stone_shore:                       // 25
-    case wooded_mountains:                  // 34
-    case savanna_plateau:                   // 36
-    case wooded_badlands_plateau:           // 38
-    case badlands_plateau:                  // 39
-    case gravelly_mountains:                // 131
-    case taiga_mountains:                   // 133
-    case snowy_taiga_mountains:             // 158
-    case modified_gravelly_mountains:       // 162
-    case shattered_savanna:                 // 163
-    case shattered_savanna_plateau:         // 164
-    case eroded_badlands:                   // 165
-    case modified_wooded_badlands_plateau:  // 166
-    case modified_badlands_plateau:         // 167
-        return mountains;
-    }
-    return plains;
-}
-
 int isCryingObsidian(int x, int y, int z)
 {
-    uint64_t l = (uint64_t)(int64_t)(int32_t)((uint32_t)x * 3129871u)
-               ^ (uint64_t)((int64_t)z * 116129781LL)
-               ^ (uint64_t)(int64_t)y;
-    l = l * l * 42317861ULL + l * 11ULL;
-
     uint64_t rng;
-    setSeed(&rng, (uint64_t)((int64_t)l >> 16));
+    setSeed(&rng, (uint64_t)mcBlockSeed(x, y, z));
     return nextFloat(&rng) < 0.15f;
-}
-
-static Pos3 rpTransform(int x, int y, int z, int mirror, int rotation, int px, int pz)
-{
-    Pos3 r;
-    if (mirror)
-        x = -x;
-    switch (rotation)
-    {
-    case 1:  r = (Pos3) {px + pz - z, y, pz - px + x}; break;
-    case 2:  r = (Pos3) {px + px - x, y, pz + pz - z}; break;
-    case 3:  r = (Pos3) {px - pz + z, y, px + pz - x}; break;
-    default: r = (Pos3) {x, y, z}; break;
-    }
-    return r;
 }
 
 // ruined portals need the whole column, not just the surface
@@ -151,15 +96,6 @@ static inline int rpOpaque(double dens, int y, int oceanFloor)
     if (oceanFloor)
         return 0;
     return y < 63;
-}
-
-static int rpBaseHeight(const double *col, int oceanFloor)
-{
-    int y;
-    for (y = RP_COL_H - 1; y >= 0; y--)
-        if (rpOpaque(col[y], y, oceanFloor))
-            return y + 1;
-    return 0;
 }
 
 static int rpFindSuitableY(uint64_t *rng, int placement, int airPocket,
@@ -214,14 +150,15 @@ static int rpResolve(RuinedPortal *out, const Generator *g, const SurfaceNoise *
         LootTableContext *loot, int x, int z, int earlyOut)
 {
     StructureSaltConfig ssconf;
+    StructureVariant sv;
     const RPTemplate *t;
     uint64_t rng, lootRng, pop;
     int cx = x >> 4, cz = z >> 4;
     int ox = cx << 4, oz = cz << 4;
-    int biomeID, type, placement, airPocket = 0, giant, idx, rotation, mirror;
+    int biomeID, type, placement, airPocket, idx;
     int pivotX, pivotZ, oceanFloor;
     int bx0, bx1, bz0, bz1, cex, cez, i;
-    double corner[4][RP_COL_H], center[RP_COL_H];
+    double corner[4][RP_COL_H];
     Pos3 p;
 
     memset(out, 0, sizeof(*out));
@@ -239,46 +176,33 @@ static int rpResolve(RuinedPortal *out, const Generator *g, const SurfaceNoise *
     if (!getStructureSaltConfig(Ruined_Portal, g->mc, biomeID, &ssconf))
         return RP_ERR_NO_STRUCTURE;
 
-    type = rpPortalType(g->mc, biomeID);
-    rng = chunkGenerateRnd(g->seed, cx, cz);
+    // getVariant gets the portal type, the underground/air pocket flags and
+    // the template rolls from the same decorator stream that findSuitableY
+    // continues from, so take the leftover state with rngOut
+    if (!getVariantRnd(&sv, Ruined_Portal, g->mc, g->seed, x, z, biomeID, &rng))
+        return RP_ERR_NO_STRUCTURE;
+
+    type = sv.biome;
+    airPocket = sv.airpocket;
     switch (type)
     {
-    case desert:
-        placement = RP_PARTLY_BURIED;
-        break;
-    case jungle:
-        placement = RP_ON_LAND_SURFACE;
-        airPocket = nextFloat(&rng) < 0.5f;
-        break;
+    case desert:        placement = RP_PARTLY_BURIED;  break;
+    case jungle:        placement = RP_ON_LAND_SURFACE; break;
     case swamp:
-    case ocean:
-        placement = RP_ON_OCEAN_FLOOR;
-        break;
-    case nether_wastes:
-        placement = RP_IN_NETHER;
-        airPocket = nextFloat(&rng) < 0.5f;
-        break;
+    case ocean:         placement = RP_ON_OCEAN_FLOOR; break;
+    case nether_wastes: placement = RP_IN_NETHER;      break;
     case mountains:
+        placement = sv.underground ? RP_IN_MOUNTAIN : RP_ON_LAND_SURFACE;
+        break;
     case plains:
     default:
-    {
-        int deep = nextFloat(&rng) < 0.5f;
-        if (type == mountains)
-            placement = deep ? RP_IN_MOUNTAIN : RP_ON_LAND_SURFACE;
-        else
-            placement = deep ? RP_UNDERGROUND : RP_ON_LAND_SURFACE;
-        airPocket = deep ? 1 : (nextFloat(&rng) < 0.5f);
+        placement = sv.underground ? RP_UNDERGROUND : RP_ON_LAND_SURFACE;
         break;
-    }
     }
     if (placement == RP_IN_NETHER)
         return RP_ERR_VERSION; // needs nether terrain, not supported
 
-    giant = nextFloat(&rng) < 0.05f;
-    idx = giant ? 10 + nextInt(&rng, 3) : nextInt(&rng, 10);
-    rotation = nextInt(&rng, 4);
-    mirror = nextFloat(&rng) >= 0.5f;
-
+    idx = sv.giant ? 10 + (sv.start - 1) : (sv.start - 1);
     t = &g_rp_templates[idx];
     pivotX = t->sx / 2;
     pivotZ = t->sz / 2;
@@ -286,8 +210,8 @@ static int rpResolve(RuinedPortal *out, const Generator *g, const SurfaceNoise *
 
     out->templateIdx    = idx;
     out->templateName   = t->name;
-    out->rotation       = rotation;
-    out->mirror         = mirror;
+    out->rotation       = sv.rotation;
+    out->mirror         = sv.mirror;
     out->placement      = placement;
     out->portalType     = type;
     out->airPocket      = airPocket;
@@ -326,24 +250,12 @@ static int rpResolve(RuinedPortal *out, const Generator *g, const SurfaceNoise *
                      out->obsidianInChest < out->obsidianNeeded))
         return RP_OK; // already ruled out, skip the terrain work
 
-    bx0 = bz0 = 0x7fffffff;
-    bx1 = bz1 = -0x7fffffff;
-    for (i = 0; i < 4; i++)
-    {
-        p = rpTransform((i & 1) ? t->sx - 1 : 0, 0, (i & 2) ? t->sz - 1 : 0,
-                mirror, rotation, pivotX, pivotZ);
-        if (p.x < bx0) bx0 = p.x;
-        if (p.x > bx1) bx1 = p.x;
-        if (p.z < bz0) bz0 = p.z;
-        if (p.z > bz1) bz1 = p.z;
-    }
-    bx0 += ox; bx1 += ox;
-    bz0 += oz; bz1 += oz;
+    bx0 = ox + sv.x; bx1 = bx0 + sv.sx - 1;
+    bz0 = oz + sv.z; bz1 = bz0 + sv.sz - 1;
 
     cex = bx0 + (bx1 - bx0 + 1) / 2;
     cez = bz0 + (bz1 - bz0 + 1) / 2;
 
-    rpColumn(g, sn, cex, cez, center);
     rpColumn(g, sn, bx0, bz0, corner[0]);
     rpColumn(g, sn, bx1, bz0, corner[1]);
     rpColumn(g, sn, bx0, bz1, corner[2]);
@@ -352,9 +264,11 @@ static int rpResolve(RuinedPortal *out, const Generator *g, const SurfaceNoise *
     out->bx0 = bx0; out->bx1 = bx1;
     out->bz0 = bz0; out->bz1 = bz1;
     out->pos.y = rpFindSuitableY(&rng, placement, airPocket,
-            rpBaseHeight(center, oceanFloor) - 1, t->sy, corner, oceanFloor);
+            getSingleBlockSurfaceHeight(g, sn, cex, cez, oceanFloor) - 1,
+            t->sy, corner, oceanFloor);
 
-    p = rpTransform(t->chestX, t->chestY, t->chestZ, mirror, rotation, pivotX, pivotZ);
+    p = templateTransform(t->chestX, t->chestY, t->chestZ,
+            sv.mirror, sv.rotation, pivotX, pivotZ);
     out->chest.x = p.x + ox;
     out->chest.y = p.y + out->pos.y;
     out->chest.z = p.z + oz;
@@ -362,8 +276,8 @@ static int rpResolve(RuinedPortal *out, const Generator *g, const SurfaceNoise *
     out->frameCount = t->nObs;
     for (i = 0; i < t->nObs; i++)
     {
-        p = rpTransform(t->planeX, t->obs[i].y, t->obs[i].z,
-                mirror, rotation, pivotX, pivotZ);
+        p = templateTransform(t->planeX, t->obs[i].y, t->obs[i].z,
+                sv.mirror, sv.rotation, pivotX, pivotZ);
         p.x += ox;
         p.y += out->pos.y;
         p.z += oz;
