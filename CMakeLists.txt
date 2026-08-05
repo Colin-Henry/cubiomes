@@ -29,6 +29,7 @@ set(HEADERS
 	util.h
 	quadbase.h
 	xrms.h
+	features/piece.h
 	features/end_city.h
 	features/fortress.h
 	features/ore.h
