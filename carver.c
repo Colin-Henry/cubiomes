@@ -82,7 +82,7 @@ int getCaveCarverConfig(int caveCarverType, int mc, int biome, CaveCarverConfig*
 
     c_cave_extra_underground_118 = {DIM_OVERWORLD, 0.07F, 1, 4, 15, getCaveThickness, 1.0, providerUniformIntBetween, -64 + 8, 47, -1, providerUniformFloatBetween, 0.1F, 0.9F, providerUniformFloatBetween, 0.7F, 1.4F, providerUniformFloatBetween, 0.8F, 1.3F, providerUniformFloatBetween, -1.0F, -0.4F},
 
-    c_ocean_cave_1164 = {DIM_OVERWORLD, 1.0F / 15, 1, 4, 15, getCaveThickness, 1.0, providerBiasedToBottom, 0, 127, 8, providerConstantFloat, 0.5F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, -0.7F, -1},
+    c_ocean_cave_1164 = {DIM_OVERWORLD, 1.0F / 15, 0, 4, 15, getCaveThickness, 1.0, providerBiasedToBottom, 0, 127, 8, providerConstantFloat, 0.5F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, -0.7F, -1},
 
     c_underwater_cave_113 = {DIM_OVERWORLD, 1.0F / 15, 1, 4, 15, getCaveThickness, 1.0, providerBiasedToBottom, 0, 127, 8, providerConstantFloat, 0.5F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, 1.0F, -1, providerConstantFloat, -0.7F, -1},
 
@@ -92,7 +92,7 @@ int getCaveCarverConfig(int caveCarverType, int mc, int biome, CaveCarverConfig*
     switch (caveCarverType) {
     case CAVE_CARVER:
         if (mc <= MC_1_17_1) {
-            if (isDeepOcean(biome) || biome == frozen_ocean) *cconf = c_cave_deep_ocean_113;
+            if (isOceanic(biome)) *cconf = c_cave_deep_ocean_113;
             else *cconf = c_cave_113;
         }
         else *cconf = c_cave_118;
@@ -125,7 +125,7 @@ int isViableCaveBiome(int caveCarverType, int biome) {
     case OCEAN_CAVE_CARVER:
         return isOceanic(biome);
     case UNDERWATER_CAVE_CARVER:
-        return isDeepOcean(biome) || biome == frozen_ocean;
+        return isOceanic(biome);
     default:
         fprintf(stderr, "ERR isViableCaveBiome: unsupported cave carver type %d\n", caveCarverType);
         return 0;
