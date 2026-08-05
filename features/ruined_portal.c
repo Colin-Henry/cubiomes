@@ -4,8 +4,7 @@
 
 #include <string.h>
 
-#define RP_COL_H 152
-#define RP_DENS_CELLS 20
+#define RP_COL_H (SURFACE_COL_TOP + 1)
 
 typedef struct { int8_t y, z; } RPCell;
 
@@ -132,29 +131,17 @@ static Pos3 rpTransform(int x, int y, int z, int mirror, int rotation, int px, i
     return r;
 }
 
+// ruined portals need the whole column, not just the surface
+// a portal can be buried, sunk or in a mountain, so rpFindSuitableY reads it at any y
 static void rpColumn(const Generator *g, const SurfaceNoise *sn, int x, int z,
         double *out)
 {
-    double c[2][2][RP_DENS_CELLS];
-    int px = x >> 2, pz = z >> 2;
-    double fx = (x & 3) / 4.0, fz = (z & 3) / 4.0;
+    double c[2][2][SURFACE_DENS_CELLS];
     int y;
 
-    surfaceCornerDens(g, sn, px+0, pz+0, c[0][0]);
-    surfaceCornerDens(g, sn, px+1, pz+0, c[1][0]);
-    surfaceCornerDens(g, sn, px+0, pz+1, c[0][1]);
-    surfaceCornerDens(g, sn, px+1, pz+1, c[1][1]);
-
+    surfaceDensCell(g, sn, x, z, c);
     for (y = 0; y < RP_COL_H; y++)
-    {
-        int py = y >> 3;
-        double fy = (y & 7) / 8.0;
-        double l00 = lerp(fy, c[0][0][py], c[0][0][py+1]);
-        double l10 = lerp(fy, c[1][0][py], c[1][0][py+1]);
-        double l01 = lerp(fy, c[0][1][py], c[0][1][py+1]);
-        double l11 = lerp(fy, c[1][1][py], c[1][1][py+1]);
-        out[y] = lerp(fz, lerp(fx, l00, l10), lerp(fx, l01, l11));
-    }
+        out[y] = surfaceDensityAt(c, x, y, z);
 }
 
 static inline int rpOpaque(double dens, int y, int oceanFloor)
