@@ -23,6 +23,17 @@ STRUCT(NaturalWaterCache) {
 void naturalWaterColumnDensity(const Generator *g, const SurfaceNoise *sn, int x, int z,
                                double dens[2][2][SURFACE_DENS_CELLS]);
 
+/**
+ * Find all carved positions in the given chunk.
+ * Positions are separated into air and water (poses and waterPoses respectively)
+ * @param g the generator (must be initialized)
+ * @param chunkX the chunk X-coordinate
+ * @param chunkZ the chunk Z-coordinate
+ * @param poses Pos3List of all carved air blocks
+ * @param waterPoses Pos3List of all carved water blocks
+ */
+void applyAllCarvers(Generator *g, const SurfaceNoise *sn, int chunkX, int chunkZ, Pos3List* poses, Pos3List* waterPoses);
+
 enum CanyonCarvers {
     CANYON_CARVER,
     UNDERWATER_CANYON_CARVER,
