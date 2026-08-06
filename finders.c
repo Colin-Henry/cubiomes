@@ -2143,7 +2143,16 @@ int isViableStructurePos(int structureType, Generator *g, int x, int z, uint32_t
         // voronoi pre-1.15 shouldn't matter for End Cities as the check will
         // be near the chunk center
         id = getBiomeAt(g, 16, chunkX, 0, chunkZ);
-        return isViableFeatureBiome(g->mc, structureType, id) ? id : 0;
+        if (!isViableFeatureBiome(g->mc, structureType, id))
+            return 0;
+        if (structureType == End_City)
+        {   // EndCityStructure also gates on the terrain height being >= 60
+            SurfaceNoise sn;
+            initSurfaceNoise(&sn, DIM_END, g->seed);
+            if (!isViableEndCityTerrain(g, &sn, x, z))
+                return 0;
+        }
+        return id;
     }
 
     // Overworld
@@ -3554,6 +3563,9 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
         }
         return 1;
     }
+        // note: piece y is relative to the city base, and sometimes the piece y
+        // coord is off by 4. Only the xz is trustworthy; chest chunk assignment
+        // and loot seeds are unaffected.
     case End_City: {
         if (n < END_CITY_PIECES_MAX) {
             return -1;
@@ -3569,17 +3581,17 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
                 piece->lootTables[0] = "end_city_treasure";
                 piece->lootTables[1] = "end_city_treasure";
                 switch (piece->rot) {
-                case 0: chestPos1X = piece->pos.x - 1 + 3; chestPos1Z = piece->pos.z - 1 + 11; break; // 0
-                case 1: chestPos1X = piece->pos.x - 1 - 11; chestPos1Z = piece->pos.z - 1 + 3; break; // 90
-                case 2: chestPos1X = piece->pos.x - 1 - 3; chestPos1Z = piece->pos.z - 1 - 11; break; // 180
-                case 3: chestPos1X = piece->pos.x - 1 + 11; chestPos1Z = piece->pos.z - 1 - 3; break; // 270
+                case 0: chestPos1X = piece->pos.x + 3; chestPos1Z = piece->pos.z + 11; break; // 0
+                case 1: chestPos1X = piece->pos.x - 11; chestPos1Z = piece->pos.z + 3; break; // 90
+                case 2: chestPos1X = piece->pos.x - 3; chestPos1Z = piece->pos.z - 11; break; // 180
+                case 3: chestPos1X = piece->pos.x + 11; chestPos1Z = piece->pos.z - 3; break; // 270
                 default: UNREACHABLE();
                 }
                 switch (piece->rot) {
-                case 0: chestPos2X = piece->pos.x - 1 + 5; chestPos2Z = piece->pos.z - 1 + 13; break; // 0
-                case 1: chestPos2X = piece->pos.x - 1 - 13; chestPos2Z = piece->pos.z - 1 + 5; break; // 90
-                case 2: chestPos2X = piece->pos.x - 1 - 5; chestPos2Z = piece->pos.z - 1 - 13; break; // 180
-                case 3: chestPos2X = piece->pos.x - 1 + 13; chestPos2Z = piece->pos.z - 1 - 5; break; // 270
+                case 0: chestPos2X = piece->pos.x + 5; chestPos2Z = piece->pos.z + 13; break; // 0
+                case 1: chestPos2X = piece->pos.x - 13; chestPos2Z = piece->pos.z + 5; break; // 90
+                case 2: chestPos2X = piece->pos.x - 5; chestPos2Z = piece->pos.z - 13; break; // 180
+                case 3: chestPos2X = piece->pos.x + 13; chestPos2Z = piece->pos.z - 5; break; // 270
                 default: UNREACHABLE();
                 }
                 piece->chestPoses[0] = (Pos) {chestPos1X, chestPos1Z};
@@ -3591,17 +3603,17 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
                 piece->lootTables[0] = "end_city_treasure";
                 piece->lootTables[1] = "end_city_treasure";
                 switch (piece->rot) {
-                case 0: chestPos1X = piece->pos.x - 1 + 5; chestPos1Z = piece->pos.z - 1 + 7; break; // 0
-                case 1: chestPos1X = piece->pos.x - 1 - 7; chestPos1Z = piece->pos.z - 1 + 5; break; // 90
-                case 2: chestPos1X = piece->pos.x - 1 - 5; chestPos1Z = piece->pos.z - 1 - 7; break; // 180
-                case 3: chestPos1X = piece->pos.x - 1 + 7; chestPos1Z = piece->pos.z - 1 - 5; break; // 270
+                case 0: chestPos1X = piece->pos.x + 5; chestPos1Z = piece->pos.z + 7; break; // 0
+                case 1: chestPos1X = piece->pos.x - 7; chestPos1Z = piece->pos.z + 5; break; // 90
+                case 2: chestPos1X = piece->pos.x - 5; chestPos1Z = piece->pos.z - 7; break; // 180
+                case 3: chestPos1X = piece->pos.x + 7; chestPos1Z = piece->pos.z - 5; break; // 270
                 default: UNREACHABLE();
                 }
                 switch (piece->rot) {
-                case 0: chestPos2X = piece->pos.x - 1 + 7; chestPos2Z = piece->pos.z - 1 + 7; break; // 0
-                case 1: chestPos2X = piece->pos.x - 1 - 7; chestPos2Z = piece->pos.z - 1 + 7; break; // 90
-                case 2: chestPos2X = piece->pos.x - 1 - 7; chestPos2Z = piece->pos.z - 1 - 7; break; // 180
-                case 3: chestPos2X = piece->pos.x - 1 + 7; chestPos2Z = piece->pos.z - 1 - 7; break; // 270
+                case 0: chestPos2X = piece->pos.x + 7; chestPos2Z = piece->pos.z + 7; break; // 0
+                case 1: chestPos2X = piece->pos.x - 7; chestPos2Z = piece->pos.z + 7; break; // 90
+                case 2: chestPos2X = piece->pos.x - 7; chestPos2Z = piece->pos.z - 7; break; // 180
+                case 3: chestPos2X = piece->pos.x + 7; chestPos2Z = piece->pos.z - 7; break; // 270
                 default: UNREACHABLE();
                 }
                 piece->chestPoses[0] = (Pos) {chestPos1X, chestPos1Z};
@@ -3612,10 +3624,10 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
                 piece->chestCount = 1;
                 piece->lootTables[0] = "end_city_treasure";
                 switch (piece->rot) {
-                case 0: chestPos1X = piece->pos.x - 1 + 6; chestPos1Z = piece->pos.z - 1 + 2; break; // 0
-                case 1: chestPos1X = piece->pos.x - 1 - 2; chestPos1Z = piece->pos.z - 1 + 6; break; // 90
-                case 2: chestPos1X = piece->pos.x - 1 - 6; chestPos1Z = piece->pos.z - 1 - 2; break; // 180
-                case 3: chestPos1X = piece->pos.x - 1 + 2; chestPos1Z = piece->pos.z - 1 - 6; break; // 270
+                case 0: chestPos1X = piece->pos.x + 6; chestPos1Z = piece->pos.z + 2; break; // 0
+                case 1: chestPos1X = piece->pos.x - 2; chestPos1Z = piece->pos.z + 6; break; // 90
+                case 2: chestPos1X = piece->pos.x - 6; chestPos1Z = piece->pos.z - 2; break; // 180
+                case 3: chestPos1X = piece->pos.x + 2; chestPos1Z = piece->pos.z - 6; break; // 270
                 default: UNREACHABLE();
                 }
                 piece->chestPoses[0] = (Pos) {chestPos1X, chestPos1Z};
