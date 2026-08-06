@@ -3563,13 +3563,11 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
         for (int i = 0; i < count; ++i) {
             Piece* piece = &list[i];
             int chestPos1X, chestPos1Z, chestPos2X, chestPos2Z;
-            int oneChest;
             switch (piece->type) {
             case FAT_TOWER_TOP: {
                 piece->chestCount = 2;
                 piece->lootTables[0] = "end_city_treasure";
                 piece->lootTables[1] = "end_city_treasure";
-                oneChest = 0;
                 switch (piece->rot) {
                 case 0: chestPos1X = piece->pos.x - 1 + 3; chestPos1Z = piece->pos.z - 1 + 11; break; // 0
                 case 1: chestPos1X = piece->pos.x - 1 - 11; chestPos1Z = piece->pos.z - 1 + 3; break; // 90
@@ -3584,13 +3582,14 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
                 case 3: chestPos2X = piece->pos.x - 1 + 13; chestPos2Z = piece->pos.z - 1 - 5; break; // 270
                 default: UNREACHABLE();
                 }
+                piece->chestPoses[0] = (Pos) {chestPos1X, chestPos1Z};
+                piece->chestPoses[1] = (Pos) {chestPos2X, chestPos2Z};
                 break;
             }
             case END_SHIP: {
                 piece->chestCount = 2;
                 piece->lootTables[0] = "end_city_treasure";
                 piece->lootTables[1] = "end_city_treasure";
-                oneChest = 0;
                 switch (piece->rot) {
                 case 0: chestPos1X = piece->pos.x - 1 + 5; chestPos1Z = piece->pos.z - 1 + 7; break; // 0
                 case 1: chestPos1X = piece->pos.x - 1 - 7; chestPos1Z = piece->pos.z - 1 + 5; break; // 90
@@ -3605,12 +3604,13 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
                 case 3: chestPos2X = piece->pos.x - 1 + 7; chestPos2Z = piece->pos.z - 1 - 7; break; // 270
                 default: UNREACHABLE();
                 }
+                piece->chestPoses[0] = (Pos) {chestPos1X, chestPos1Z};
+                piece->chestPoses[1] = (Pos) {chestPos2X, chestPos2Z};
                 break;
             }
             case THIRD_FLOOR_2: {
                 piece->chestCount = 1;
                 piece->lootTables[0] = "end_city_treasure";
-                oneChest = 1;
                 switch (piece->rot) {
                 case 0: chestPos1X = piece->pos.x - 1 + 6; chestPos1Z = piece->pos.z - 1 + 2; break; // 0
                 case 1: chestPos1X = piece->pos.x - 1 - 2; chestPos1Z = piece->pos.z - 1 + 6; break; // 90
@@ -3618,39 +3618,55 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
                 case 3: chestPos1X = piece->pos.x - 1 + 2; chestPos1Z = piece->pos.z - 1 - 6; break; // 270
                 default: UNREACHABLE();
                 }
+                piece->chestPoses[0] = (Pos) {chestPos1X, chestPos1Z};
                 break;
             }
             default:
                 piece->chestCount = 0;
-                continue;
+                break;
             }
-            // it is assumed that no two pieces have a chest in the same chunk
-            if (oneChest) {
-                piece->chestPoses[0] = (Pos) {chestPos1X, chestPos1Z};
-                uint64_t populationSeed = getPopulationSeed(mc, seed, chestPos1X & ~15, chestPos1Z & ~15);
+        }
+        // chests now are logged and then loot seeds are calculated after
+        // used to assume 1 chest per chunk from different pieces but ~5% of seeds have 2+
+        for (int i = 0; i < count; ++i) {
+            for (int c = 0; c < list[i].chestCount; ++c) {
+                int chunkX = list[i].chestPoses[c].x >> 4;
+                int chunkZ = list[i].chestPoses[c].z >> 4;
+
+                int seen = 0;
+                for (int j = 0; j <= i && !seen; ++j) {
+                    int upto = (j == i) ? c : list[j].chestCount;
+                    for (int d = 0; d < upto; ++d) {
+                        if (list[j].chestPoses[d].x >> 4 == chunkX &&
+                            list[j].chestPoses[d].z >> 4 == chunkZ) {
+                            seen = 1;
+                            break;
+                        }
+                    }
+                }
+                if (seen)
+                    continue;
+
+                uint64_t populationSeed = getPopulationSeed(mc, seed,
+                        list[i].chestPoses[c].x & ~15, list[i].chestPoses[c].z & ~15);
                 rnd.setSeed(rnd.state, populationSeed + ssconf.decoratorIndex + 10000 * ssconf.generationStep);
-                rnd.nextLong(rnd.state); // LootTableSeed from placeInWorld is not used
-                piece->lootSeeds[0] = rnd.nextLong(rnd.state);
-            } else {
-                piece->chestPoses[0] = (Pos) {chestPos1X, chestPos1Z};
-                piece->chestPoses[1] = (Pos) {chestPos2X, chestPos2Z};
-                if (chestPos1X >> 4 == chestPos2X >> 4 && chestPos1Z >> 4 == chestPos2Z >> 4) {
-                    uint64_t populationSeed = getPopulationSeed(mc, seed, chestPos1X & ~15, chestPos1Z & ~15);
-                    rnd.setSeed(rnd.state, populationSeed + ssconf.decoratorIndex + 10000 * ssconf.generationStep);
-                    rnd.nextLong(rnd.state);
-                    rnd.nextLong(rnd.state);
-                    piece->lootSeeds[0] = rnd.nextLong(rnd.state);
-                    piece->lootSeeds[1] = rnd.nextLong(rnd.state);
-                } else {
-                    uint64_t populationSeed;
-                    populationSeed = getPopulationSeed(mc, seed, chestPos1X & ~15, chestPos1Z & ~15);
-                    rnd.setSeed(rnd.state, populationSeed + ssconf.decoratorIndex + 10000 * ssconf.generationStep);
-                    rnd.nextLong(rnd.state);
-                    piece->lootSeeds[0] = rnd.nextLong(rnd.state);
-                    populationSeed = getPopulationSeed(mc, seed, chestPos2X & ~15, chestPos2Z & ~15);
-                    rnd.setSeed(rnd.state, populationSeed + ssconf.decoratorIndex + 10000 * ssconf.generationStep);
-                    rnd.nextLong(rnd.state);
-                    piece->lootSeeds[1] = rnd.nextLong(rnd.state);
+
+                for (int j = 0; j < count; ++j) {
+                    int inChunk = 0;
+                    for (int d = 0; d < list[j].chestCount; ++d) {
+                        if (list[j].chestPoses[d].x >> 4 == chunkX &&
+                            list[j].chestPoses[d].z >> 4 == chunkZ)
+                            inChunk++;
+                    }
+                    if (inChunk == 0)
+                        continue;
+                    for (int d = 0; d < inChunk; ++d)
+                        rnd.nextLong(rnd.state); // LootTableSeed from placeInWorld is not used
+                    for (int d = 0; d < list[j].chestCount; ++d) {
+                        if (list[j].chestPoses[d].x >> 4 == chunkX &&
+                            list[j].chestPoses[d].z >> 4 == chunkZ)
+                            list[j].lootSeeds[d] = rnd.nextLong(rnd.state);
+                    }
                 }
             }
         }
