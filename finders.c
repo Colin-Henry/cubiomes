@@ -790,10 +790,17 @@ int isEndChunkEmpty(const EndNoise *en, const SurfaceNoise *sn, uint64_t seed,
             int n = getEndIslands(is, en->mc, seed, chunkX+i, chunkZ+j);
             while (n --> 0)
             {
-                if (is[n].x + is[n].r <= chunkX*16) continue;
-                if (is[n].z + is[n].r <= chunkZ*16) continue;
-                if (is[n].x - is[n].r > chunkX*16 + 15) continue;
-                if (is[n].z - is[n].r > chunkZ*16 + 15) continue;
+                int r = is[n].r;
+                int jlo = chunkX*16 - is[n].x, jhi = chunkX*16 + 15 - is[n].x;
+                int klo = chunkZ*16 - is[n].z, khi = chunkZ*16 + 15 - is[n].z;
+                if (jlo < -r) jlo = -r;
+                if (jhi > +r) jhi = +r;
+                if (klo < -r) klo = -r;
+                if (khi > +r) khi = +r;
+                if (jlo > jhi || klo > khi) continue;
+                int j = jlo > 0 ? jlo : (jhi < 0 ? jhi : 0);
+                int k = klo > 0 ? klo : (khi < 0 ? khi : 0);
+                if (j*j + k*k > (r+1)*(r+1)) continue;
                 int id;
                 mapEndBiome(en, &id, is[n].x >> 4, is[n].z >> 4, 1, 1);
                 if (id == small_end_islands)
