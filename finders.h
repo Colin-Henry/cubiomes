@@ -148,7 +148,7 @@ STRUCT(Piece)
     const char *name;         // structure piece name
     Pos3 pos, bb0, bb1;       // position and bounding box limits
     uint8_t rot;              // rotation
-    int8_t depth;
+    int32_t depth;            // depth - end cities store a whole 32-bit nextInt() here
     int8_t type;
     int chestCount;
     Pos chestPoses[4];        // assume a maximum of four chests
