@@ -147,7 +147,9 @@ int genTower(EndCityPieceEnv *env, Piece *current, int depth)
             if (!next(env->rng, 1))
                 continue;
             int brot = (rot + binfo[i][0]) & 3;
-            Piece *bridge = addEndCityPiece(env, base, brot,
+            // the bridges hang off the floor piece, not off the top of the
+            // tower - same xz, but 4 blocks lower per tower_piece between them
+            Piece *bridge = addEndCityPiece(env, floor, brot,
                 binfo[i][1], binfo[i][2], binfo[i][3], BRIDGE_END);
             genPiecesRecusively(genBridge, env, bridge, depth+1);
         }
@@ -187,7 +189,9 @@ int genBridge(EndCityPieceEnv *env, Piece *current, int depth)
     {
         int x = -8 + nextInt(env->rng, 8);
         int z = -70 + nextInt(env->rng, 10);
-        base = addEndCityPiece(env, base, rot, x, y, z, END_SHIP);
+        // the ship is a dead end: the closing bridge_end below still hangs off
+        // the last bridge piece, so don't advance base onto it
+        addEndCityPiece(env, base, rot, x, y, z, END_SHIP);
         *env->ship = 1;
     }
     else

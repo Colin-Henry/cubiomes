@@ -2072,6 +2072,38 @@ static const uint64_t g_monument_biomes1 =
     (1ULL << warm_ocean) |
     (1ULL << deep_warm_ocean);
 
+// isViableEndCityTerrain is not accurate enough. Same goal but this is more fine (and expensive)
+static int getEndCityFeatureY(const Generator *g, int chunkX, int chunkZ)
+{
+    SurfaceNoise sn;
+    initSurfaceNoise(&sn, DIM_END, g->seed);
+
+    uint64_t cs;
+    setSeed(&cs, (uint64_t)(int64_t)(int32_t)((uint32_t)chunkX + (uint32_t)chunkZ * 10387313u));
+    int dx = 5, dz = 5;
+    switch (nextInt(&cs, 4))
+    {
+    case 1: dx = -5; break;
+    case 2: dx = -5; dz = -5; break;
+    case 3: dz = -5; break;
+    }
+
+    int x = chunkX * 16 + 7;
+    int z = chunkZ * 16 + 7;
+    int i, y = 0x7fffffff;
+    for (i = 0; i < 4; i++)
+    {
+        float h = 0;
+        // ymin=56 only needs to resolve heights either side of 60, which is all
+        // the >= 60 test cares about, and halves the sampled column
+        mapEndSurfaceHeight(&h, &g->en, &sn, x + ((i & 1) ? dx : 0),
+                z + ((i & 2) ? dz : 0), 1, 1, 1, 56);
+        if ((int)h < y) y = (int)h;
+    }
+    return y;
+}
+
+
 int isViableStructurePos(int structureType, Generator *g, int x, int z, uint32_t flags)
 {
     int approx = 0; // enables approximation levels
@@ -2145,13 +2177,9 @@ int isViableStructurePos(int structureType, Generator *g, int x, int z, uint32_t
         id = getBiomeAt(g, 16, chunkX, 0, chunkZ);
         if (!isViableFeatureBiome(g->mc, structureType, id))
             return 0;
-        if (structureType == End_City)
-        {   // EndCityStructure also gates on the terrain height being >= 60
-            SurfaceNoise sn;
-            initSurfaceNoise(&sn, DIM_END, g->seed);
-            if (!isViableEndCityTerrain(g, &sn, x, z))
-                return 0;
-        }
+        // TODO add a flag or something to determine whether to use isViableEndCityTerrain or getEndCityFeature
+        if (structureType == End_City && getEndCityFeatureY(g, chunkX, chunkZ) < 60)
+            return 0;
         return id;
     }
 
@@ -3637,6 +3665,23 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
                 piece->chestCount = 0;
                 break;
             }
+        }
+        // ChunkGenerator.createReferences only looks 8 chunks out, so a chunk
+        // further than that from the start chunk never learns about the city
+        // and its pieces (long ship bridges included) are never placed
+        for (int i = 0; i < count; ++i) {
+            Piece* piece = &list[i];
+            int keep = 0;
+            for (int c = 0; c < piece->chestCount; ++c) {
+                int dx = (piece->chestPoses[c].x >> 4) - (posX >> 4);
+                int dz = (piece->chestPoses[c].z >> 4) - (posZ >> 4);
+                if (dx < -8 || dx > 8 || dz < -8 || dz > 8)
+                    continue;
+                piece->chestPoses[keep] = piece->chestPoses[c];
+                piece->lootTables[keep] = piece->lootTables[c];
+                keep++;
+            }
+            piece->chestCount = keep;
         }
         // chests now are logged and then loot seeds are calculated after
         // used to assume 1 chest per chunk from different pieces but ~5% of seeds have 2+
