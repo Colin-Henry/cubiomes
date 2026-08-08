@@ -3832,7 +3832,7 @@ Pos getLinkedGatewayChunk(const EndNoise *en, const SurfaceNoise *sn, uint64_t s
 
     if (isEndChunkEmpty(en, sn, seed, c.x, c.z))
     {   // look forward for the first non-empty chunk
-        for (i = 0; i < 15; i++)
+        for (i = 0; i < 16; i++)
         {
             int qx = (int) floor(px += dx) >> 4;
             int qz = (int) floor(pz += dz) >> 4;
@@ -3846,22 +3846,33 @@ Pos getLinkedGatewayChunk(const EndNoise *en, const SurfaceNoise *sn, uint64_t s
     }
     else
     {   // look backward for the last non-empty chunk
-        for (i = 0; i < 15; i++)
+        for (i = 0; i < 16; i++)
         {
             int qx = (int) floor(px -= dx) >> 4;
             int qz = (int) floor(pz -= dz) >> 4;
             if (isEndChunkEmpty(en, sn, seed, qx, qz))
+            {   // java's second loop steps forward again off the empty
+                // chunk, so the ray point ends one step further out
+                px += dx;
+                pz += dz;
                 break;
+            }
             c.x = qx;
             c.z = qz;
         }
     }
     if (dst)
-    {
-        dst->x = (int) floor(px);
-        dst->z = (int) floor(pz);
+    {   // new BlockPos(vec.x + 0.5, 75, vec.z + 0.5) in java
+        dst->x = (int) floor(px + 0.5);
+        dst->z = (int) floor(pz + 0.5);
     }
     return c;
+}
+
+static uint64_t blockPosPack(int x, int y, int z)
+{   // 26 bits x, 12 bits y, 26 bits z
+    return (((uint64_t)x & 0x3ffffff) << 38) | ((uint64_t)y & 0xfff) |
+           (((uint64_t)z & 0x3ffffff) << 12);
 }
 
 Pos getLinkedGatewayPos(const EndNoise *en, const SurfaceNoise *sn, uint64_t seed, Pos src)
@@ -3869,21 +3880,35 @@ Pos getLinkedGatewayPos(const EndNoise *en, const SurfaceNoise *sn, uint64_t see
     float y[33*33]; // buffer for [16][16] and [33][33]
     int ymin = 0;
     int i, j;
+    int fallback = 1;
+    EndIsland fbis;
 
     Pos dst;
     Pos c = getLinkedGatewayChunk(en, sn, seed, src, &dst);
 
-    if (en->mc > MC_1_16)
+    if (en->mc >= MC_1_16_1)
     {
         // The original java implementation has a bug where the result
         // variable for the in-chunk block search is assigned a reference
         // to the mutable iterator, which ends up as the last iteration
-        // position and discards the found location.
-        dst.x = c.x * 16 + 15;
-        dst.z = c.z * 16 + 15;
+        // position and discards the found location
+        // <= 1.15 is still unverified
+        mapEndSurfaceHeight(y, en, sn, c.x*16, c.z*16, 16, 16, 1, 30);
+        mapEndIslandHeight(y, en, seed, c.x*16, c.z*16, 16, 16, 1);
+        for (i = 0; i < 16*16; i++)
+        {
+            if (y[i] >= 30) fallback = 0;
+            if (y[i] > ymin) ymin = (int) floor(y[i]);
+        }
+        if (!fallback)
+        {
+            dst.x = c.x * 16 + 15;
+            dst.z = c.z * 16 + 15;
+        }
     }
     else
     {
+        fallback = 0;
         mapEndSurfaceHeight(y, en, sn, c.x*16, c.z*16, 16, 16, 1, 30);
         mapEndIslandHeight(y, en, seed, c.x*16, c.z*16, 16, 16, 1);
 
@@ -3912,17 +3937,33 @@ Pos getLinkedGatewayPos(const EndNoise *en, const SurfaceNoise *sn, uint64_t see
                 ymin = (int) floor(y[i]);
     }
 
+    if (fallback)
+    {   // Features.END_ISLAND placed at the ray point with a positional
+        // seed. Only the top disk matters for a height map, the layers
+        // below it shrink as they descend.
+        uint64_t rng;
+        setSeed(&rng, blockPosPack(dst.x, 75, dst.z));
+        fbis.x = dst.x;
+        fbis.y = 75;
+        fbis.z = dst.z;
+        fbis.r = nextInt(&rng, 3) + 4;
+    }
+
     Pos sp = { dst.x-16, dst.z-16 };
     // checking end islands is much cheaper than surface height generation, so
     // we can also skip surface generation lower than the highest island around
     memset(y, 0, sizeof(float)*33*33);
     mapEndIslandHeight(y, en, seed, sp.x, sp.z, 33, 33, 1);
+    if (fallback)
+        applyEndIslandHeight(y, &fbis, sp.x, sp.z, 33, 33, 1);
     for (i = 0; i < 33*33; i++)
         if (y[i] > ymin)
             ymin = (int) floor(y[i]);
 
     mapEndSurfaceHeight(y, en, sn, sp.x, sp.z, 33, 33, 1, ymin);
     mapEndIslandHeight(y, en, seed, sp.x, sp.z, 33, 33, 1);
+    if (fallback)
+        applyEndIslandHeight(y, &fbis, sp.x, sp.z, 33, 33, 1);
 
     float v = -1;
     for (i = 0; i < 33; i++)
