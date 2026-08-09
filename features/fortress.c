@@ -42,6 +42,8 @@ Piece *addFortressPiece(FortressPieceEnv *env, int typ, int x, int y, int z, int
     Pos3 pos = {x, y, z};
     Pos3 b0 = pos, b1 = pos;
     Pos3 d0 = fortress_info[typ].offset, d1 = fortress_info[typ].size;
+    if (*env->n >= env->nmax)
+        return NULL; // out of buffer space, stop adding pieces
     b0.y += d0.y;
     b1.y += d0.y+d1.y;
     switch (facing)
@@ -72,6 +74,7 @@ Piece *addFortressPiece(FortressPieceEnv *env, int typ, int x, int y, int z, int
     p->depth = depth;
     p->type = typ;
     p->next = NULL;
+    p->chestCount = 0;
 
     int i, n = *env->n;
     for (i = 0; i < n; i++)
@@ -228,6 +231,9 @@ int getFortressPieces(Piece *list, int n, int mc, uint64_t seed, int chunkX, int
         rng = chunkGenerateRnd(seed, chunkX, chunkZ);
     }
 
+    if (n < 1)
+        return 0;
+
     int count = 1;
     FortressPieceEnv env;
     memset(&env, 0, sizeof(env));
@@ -258,6 +264,7 @@ int getFortressPieces(Piece *list, int n, int mc, uint64_t seed, int chunkX, int
     p->depth = 0;
     p->type = 0;
     p->next = NULL;
+    p->chestCount = 0;
     extendFortressPiece(&env, p);
     while (list->next)
     {
@@ -273,6 +280,29 @@ int getFortressPieces(Piece *list, int n, int mc, uint64_t seed, int chunkX, int
         p->next = q->next;
         q->next = NULL;
         extendFortressPiece(&env, q);
+    }
+
+    /* The whole fortress is finally shifted so that it sits between y=48 and
+     * y=70 (StructureStart.moveInsideHeights). This happens after every piece
+     * is placed, so it only moves them, it cannot change the layout.
+     */
+    {
+        int i, minY = list[0].bb0.y, maxY = list[0].bb1.y, span, room, base;
+        for (i = 1; i < count; i++)
+        {
+            if (list[i].bb0.y < minY) minY = list[i].bb0.y;
+            if (list[i].bb1.y > maxY) maxY = list[i].bb1.y;
+        }
+        span = maxY - minY + 1;
+        room = 70 - 48 + 1 - span;
+        base = room > 1 ? 48 + nextInt(&rng, room) : 48;
+        int dy = base - minY;
+        for (i = 0; i < count; i++)
+        {
+            list[i].pos.y += dy;
+            list[i].bb0.y += dy;
+            list[i].bb1.y += dy;
+        }
     }
     return count;
 }

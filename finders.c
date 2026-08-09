@@ -3102,6 +3102,21 @@ int getLootTableCountForStructure(int structure, int mc) {
     }
 }
 
+// StructurePiece.getWorldX / getWorldZ: turn a position inside a piece
+// template into world coordinates
+static Pos pieceLocalToWorld(const Piece *p, int lx, int lz)
+{
+    Pos r;
+    switch (p->rot) {
+    case 0: r.x = p->bb0.x + lx; r.z = p->bb1.z - lz; break; // north
+    case 1: r.x = p->bb0.x + lz; r.z = p->bb0.z + lx; break; // east
+    case 2: r.x = p->bb0.x + lx; r.z = p->bb0.z + lz; break; // south
+    case 3: r.x = p->bb1.x - lz; r.z = p->bb0.z + lx; break; // west
+    default: UNREACHABLE();
+    }
+    return r;
+}
+
 int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf, StructureVariant *sv, int mc, uint64_t seed, int posX, int posZ) {
     int minBlockX = posX & ~15;
     int minBlockZ = posZ & ~15;
@@ -3437,43 +3452,35 @@ int getStructurePieces(Piece *list, int n, int stype, StructureSaltConfig ssconf
         CREATE_RANDOM_SOURCE(rnd, legacy);
         for (int i = 0; i < count; ++i) {
             Piece* piece = &list[i];
-            int chestPosX, chestPosZ;
+            int localX;
             switch (piece->type) {
-            case CORRIDOR_TURN_LEFT: {
-                if (!piece->chestCount) {
-                    continue;
-                }
-                piece->lootTables[0] = "nether_bridge";
-                switch (piece->rot) {
-                case 0: chestPosX = piece->pos.x - 1 + 3; chestPosZ = piece->pos.z - 1 + 3; break; // 0
-                case 1: chestPosX = piece->pos.x - 1 - 3; chestPosZ = piece->pos.z - 1 + 3; break; // 90
-                case 2: chestPosX = piece->pos.x - 1 - 3; chestPosZ = piece->pos.z - 1 - 3; break; // 180
-                case 3: chestPosX = piece->pos.x - 1 + 3; chestPosZ = piece->pos.z - 1 - 3; break; // 270
-                default: UNREACHABLE();
-                }
-                break;
-            }
-            case CORRIDOR_TURN_RIGHT:
-                if (!piece->chestCount) {
-                    continue;
-                }
-                piece->lootTables[0] = "nether_bridge";
-                switch (piece->rot) {
-                case 0: chestPosX = piece->pos.x - 1 + 1; chestPosZ = piece->pos.z - 1 + 3; break; // 0
-                case 1: chestPosX = piece->pos.x - 1 - 3; chestPosZ = piece->pos.z - 1 + 1; break; // 90
-                case 2: chestPosX = piece->pos.x - 1 - 1; chestPosZ = piece->pos.z - 1 - 3; break; // 180
-                case 3: chestPosX = piece->pos.x - 1 + 3; chestPosZ = piece->pos.z - 1 - 1; break; // 270
-                default: UNREACHABLE();
-                }
-                break;
+            // the chest sits at a fixed spot inside the turn template
+            case CORRIDOR_TURN_LEFT:  localX = 3; break;
+            case CORRIDOR_TURN_RIGHT: localX = 1; break;
             default:
                 piece->chestCount = 0;
                 continue;
             }
-            piece->chestPoses[0] = (Pos) {chestPosX, chestPosZ};
-            // it is assumed that no two pieces have a chest in the same chunk
-            uint64_t populationSeed = getPopulationSeed(mc, seed, chestPosX & ~15, chestPosZ & ~15);
+            if (!piece->chestCount) {
+                continue;
+            }
+            piece->lootTables[0] = "nether_bridge";
+            Pos chestPos = pieceLocalToWorld(piece, localX, 3);
+            piece->chestPoses[0] = chestPos;
+            // several pieces can have a chest in the same chunk, in which case
+            // their loot seeds are drawn one after another in piece order
+            int skip = 0;
+            for (int j = 0; j < i; ++j) {
+                if (!list[j].chestCount)
+                    continue;
+                if ((list[j].chestPoses[0].x >> 4) == (chestPos.x >> 4) &&
+                    (list[j].chestPoses[0].z >> 4) == (chestPos.z >> 4))
+                    skip++;
+            }
+            uint64_t populationSeed = getPopulationSeed(mc, seed, chestPos.x & ~15, chestPos.z & ~15);
             rnd.setSeed(rnd.state, populationSeed + ssconf.decoratorIndex + 10000 * ssconf.generationStep);
+            while (skip-- > 0)
+                rnd.nextLong(rnd.state);
             piece->lootSeeds[0] = rnd.nextLong(rnd.state);
         }
         return count;
