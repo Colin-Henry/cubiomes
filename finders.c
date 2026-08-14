@@ -339,7 +339,9 @@ int getStructureSaltConfig(int structureType, int mc, int biome, StructureSaltCo
     ss_end_city_1161 =               {4, 10},
     ss_end_city_118 =                {4, 11},
     ss_end_city_1192 =               {4, 12},
-    ss_end_city_1194 =               {4,  2};
+    ss_end_city_1194 =               {4,  2},
+
+    ss_ancient_city_119 =            {7,  0};
 
     switch (structureType) {
     case Treasure:
@@ -449,6 +451,9 @@ int getStructureSaltConfig(int structureType, int mc, int biome, StructureSaltCo
         else if (mc < MC_1_19_4) *ssconf = ss_end_city_1192;
         else *ssconf = ss_end_city_1194;
         return mc >= MC_1_13;
+    case Ancient_City:
+        *ssconf = ss_ancient_city_119;
+        return mc >= MC_1_19;
     default:
         fprintf(stderr, "ERR getStructureSaltConfig: unsupported structure type %d\n", structureType);
         memset(ssconf, 0, sizeof(StructureSaltConfig));

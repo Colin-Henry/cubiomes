@@ -335,7 +335,7 @@ static int appendShuffledPool(const Ctx *c, int poolIdx, int *cand, int ncand)
         for (w = 0; w < e->weight; w++)
             buf[n++] = p->entryStart + i;
     }
-    FASTUTIL_SHUFFLE(buf, n, c->rng, int);
+    COLLECTIONS_SHUFFLE(buf, n, c->rng, int);
     memcpy(cand + ncand, buf, n * sizeof(int));
     return ncand + n;
 }
@@ -537,10 +537,10 @@ int getJigsawPieces(const JigsawData *jd, const JigsawConfig *jc,
     const JigsawPoolDef *pool = NULL;
     const JigsawPoolEntryDef *startEntry = NULL;
     JigsawPiece *start;
-    int i, rot, pick, cx, cz, k, l, dy, dist, ret = -1;
+    int i, rot, pick, cx, cz, k, centerY, l, dy, dist, ret = -1;
+    int anchorLocalX = 0, anchorLocalY = 0, anchorLocalZ = 0;
+    int startX = blockX, startY = jc->startHeight, startZ = blockZ;
 
-    if (jc->startJigsawName)
-        return -1; // not implemented yet
     if (jc->projectStartToHeightmap && (!g || !sn))
         return -1;
 
@@ -565,6 +565,36 @@ int getJigsawPieces(const JigsawData *jd, const JigsawConfig *jc,
     if (!startEntry || startEntry->kind == JIGSAW_ELEMENT_EMPTY)
         return -1;
 
+    if (jc->startJigsawName) {
+        Ctx ac;
+        JigInst jigs[MAX_JIGS];
+        int njigs, nameIdx, found = 0;
+        memset(&ac, 0, sizeof(ac));
+        ac.jd = jd;
+        ac.rng = rng;
+        makeFeatureBlock(jd, &ac.featureBlock);
+        nameIdx = findString(jd, jc->startJigsawName);
+        if (nameIdx < 0)
+            return -1;
+        njigs = elementJigsawBlocks(&ac, startEntry, rot, 0, 0, 0, jigs);
+        if (njigs < 0)
+            return -1;
+        for (i = 0; i < njigs; i++) {
+            if (jigs[i].def->name == nameIdx) {
+                anchorLocalX = jigs[i].wx;
+                anchorLocalY = jigs[i].wy;
+                anchorLocalZ = jigs[i].wz;
+                found = 1;
+                break;
+            }
+        }
+        if (!found)
+            return -1;
+        startX -= anchorLocalX;
+        startY -= anchorLocalY;
+        startZ -= anchorLocalZ;
+    }
+
     start = &out[0];
     start->templateIdx = (int16_t) elementTemplateIdx(jd, startEntry);
     start->entryIdx = (int16_t)(startEntry - jd->poolEntries);
@@ -572,14 +602,14 @@ int getJigsawPieces(const JigsawData *jd, const JigsawConfig *jc,
     start->depth = 0;
     start->projection = startEntry->projection;
     start->groundLevelDelta = 1;
-    start->x = blockX; start->y = jc->startHeight; start->z = blockZ;
-    elementBounds(jd, startEntry, rot, blockX, jc->startHeight, blockZ, start->bb);
+    start->x = startX; start->y = startY; start->z = startZ;
+    elementBounds(jd, startEntry, rot, startX, startY, startZ, start->bb);
 
     cx = (start->bb[0] + start->bb[3]) / 2;
     cz = (start->bb[2] + start->bb[5]) / 2;
-    k = jc->startHeight;
+    k = startY;
     if (jc->projectStartToHeightmap)
-        k += getSingleBlockSurfaceHeight(g, sn, cx, cz, 0);
+        k = jc->startHeight + getSingleBlockSurfaceHeight(g, sn, cx, cz, 0);
     l = start->bb[1] + start->groundLevelDelta;
     dy = k - l;
     start->y += dy; start->bb[1] += dy; start->bb[4] += dy;
@@ -609,9 +639,10 @@ int getJigsawPieces(const JigsawData *jd, const JigsawConfig *jc,
     makeFeatureBlock(jd, &c.featureBlock);
 
     dist = jc->maxDistanceFromCenter;
-    c.shapes[0].outer.x0 = cx - dist; c.shapes[0].outer.x1 = cx + dist + 1;
-    c.shapes[0].outer.y0 = k - dist;  c.shapes[0].outer.y1 = k + dist + 1;
-    c.shapes[0].outer.z0 = cz - dist; c.shapes[0].outer.z1 = cz + dist + 1;
+    centerY = k + anchorLocalY;
+    c.shapes[0].outer.x0 = cx - dist;      c.shapes[0].outer.x1 = cx + dist + 1;
+    c.shapes[0].outer.y0 = centerY - dist; c.shapes[0].outer.y1 = centerY + dist + 1;
+    c.shapes[0].outer.z0 = cz - dist;      c.shapes[0].outer.z1 = cz + dist + 1;
     c.nshapes = 1;
     if (shapeSubtract(&c.shapes[0], start->bb))
         goto done;
@@ -737,7 +768,7 @@ int getJigsawStructurePieces(int structureType, int mc, int biome,
 
     if (!jd || !getJigsawConfig(structureType, mc, biome, &jc))
         return -1;
-    if (mc >= MC_1_20_6) // TODO add priority stuff for newer version
+    if (mc >= MC_1_20_6 && structureType != Ancient_City) // TODO add priority stuff for newer version
         return -1;
 
     setSeed(&rng, seed);
@@ -848,18 +879,18 @@ int getJigsawLoot(const JigsawData *jd, StructureSaltConfig ssconf, int mc,
     }
 
     for (i = 0; i < n; i++) {
-        uint64_t r;
         int cx = out[i].x >> 4, cz = out[i].z >> 4;
         for (j = 0; j < i; j++)
             if ((out[j].x >> 4) == cx && (out[j].z >> 4) == cz)
                 break;
         if (j < i) // an earlier chest already seeded this chunk
             continue;
-        setSeed(&r, getPopulationSeed(mc, seed, cx * 16, cz * 16)
+        CREATE_RANDOM_SOURCE(rnd, mc <= MC_1_17);
+        rnd.setSeed(rnd.state, getPopulationSeed(mc, seed, cx * 16, cz * 16)
                     + ssconf.decoratorIndex + 10000 * ssconf.generationStep);
         for (j = i; j < n; j++)
             if ((out[j].x >> 4) == cx && (out[j].z >> 4) == cz)
-                out[j].lootSeed = nextLong(&r);
+                out[j].lootSeed = rnd.nextLong(rnd.state);
     }
     return n;
 }

@@ -5,6 +5,14 @@
 #include "loot_table_context.h"
 #include "../biomes.h"
 
+#include "loot_tables/ancient_city_1_20.h"
+#include "loot_tables/ancient_city_1_21_1.h"
+#include "loot_tables/ancient_city_1_21_6.h"
+#include "loot_tables/ancient_city_1_21_11.h"
+#include "loot_tables/ancient_city_26_1.h"
+#include "loot_tables/ancient_city_26_2.h"
+#include "loot_tables/ancient_city_ice_box_1_21_11.h"
+#include "loot_tables/ancient_city_ice_box_26_2.h"
 #include "loot_tables/bastion_bridge_1_16_1.h"
 #include "loot_tables/bastion_bridge_1_16_5.h"
 #include "loot_tables/bastion_bridge_1_20.h"
@@ -85,6 +93,9 @@
 #include "loot_tables/stronghold_library_1_20.h"
 
 int init_loot_table_name(LootTableContext** context, const char* loot_table, int version) {
+    if (strcmp(loot_table, "ancient_city") == 0) {
+        return init_ancient_city(context, version);
+    }
     if (strcmp(loot_table, "bastion_bridge") == 0) {
         return init_bastion_bridge(context, version);
     }
@@ -96,6 +107,9 @@ int init_loot_table_name(LootTableContext** context, const char* loot_table, int
     }
     if (strcmp(loot_table, "bastion_treasure") == 0) {
         return init_bastion_treasure(context, version);
+    }
+    if (strcmp(loot_table, "ancient_city_ice_box") == 0) {
+        return init_ancient_city_ice_box(context, version);
     }
     if (strcmp(loot_table, "buried_treasure") == 0) {
         return init_buried_treasure(context, version);
@@ -196,6 +210,23 @@ int init_loot_table_name(LootTableContext** context, const char* loot_table, int
     fprintf(stderr, "ERR init_loot_table_name: unsupported loot_table %s\n", loot_table);
     *context = NULL;
     return 0;
+}
+
+// IMPORTANT: 
+int init_ancient_city(LootTableContext** context, int version) {
+    if (version < MC_1_21_1) *context = init_ancient_city_1_20(version);
+    else if (version < MC_1_21_6) *context = init_ancient_city_1_21_1(version);
+    else if (version < MC_1_21_11) *context = init_ancient_city_1_21_6(version);
+    else if (version < MC_26_1) *context = init_ancient_city_1_21_11(version);
+    else if (version < MC_26_2) *context = init_ancient_city_26_1(version);
+    else *context = init_ancient_city_26_2(version);
+    return version > MC_1_19;
+}
+
+int init_ancient_city_ice_box(LootTableContext** context, int version) {
+    if (version < MC_26_2) *context = init_ancient_city_ice_box_1_21_11(version);
+    else *context = init_ancient_city_ice_box_26_2(version);
+    return version > MC_1_19;
 }
 
 int init_bastion_bridge(LootTableContext** context, int version) {
