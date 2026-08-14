@@ -146,7 +146,11 @@ def main():
         with open(file_name, 'r', encoding='UTF-8') as f:
             data = json.load(f)
 
-        loot_table_name, version, _ = file_name.split('.')
+        name_parts = file_name.split('.')
+        if len(name_parts) != 3:
+            warn(f"Skipping {file_name}: expected <name>.<version>.json")
+            continue
+        loot_table_name, version, _ = name_parts
         context = parse_loot_table(version, data["pools"])
         c_file_name = loot_table_name + '_' + version
         c_file_content = gen_c_loot_table(c_file_name, context)

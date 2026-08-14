@@ -10,6 +10,7 @@ int item_name2global_id(const char* name) {
     if (strcmp(name, "minecraft:amethyst_shard") == 0) return ITEM_AMETHYST_SHARD;
     if (strcmp(name, "minecraft:apple") == 0) return ITEM_APPLE;
     if (strcmp(name, "minecraft:arrow") == 0) return ITEM_ARROW;
+    if (strcmp(name, "minecraft:baked_potato") == 0) return ITEM_BAKED_POTATO;
     if (strcmp(name, "minecraft:bamboo") == 0) return ITEM_BAMBOO;
     if (strcmp(name, "minecraft:barrel") == 0) return ITEM_BARREL;
     if (strcmp(name, "minecraft:beef") == 0) return ITEM_BEEF;
@@ -142,6 +143,7 @@ int item_name2global_id(const char* name) {
     if (strcmp(name, "minecraft:nether_wart") == 0) return ITEM_NETHER_WART;
     if (strcmp(name, "minecraft:oak_sapling") == 0) return ITEM_OAK_SAPLING;
     if (strcmp(name, "minecraft:obsidian") == 0) return ITEM_OBSIDIAN;
+    if (strcmp(name, "minecraft:packed_ice") == 0) return ITEM_PACKED_ICE;
     if (strcmp(name, "minecraft:paper") == 0) return ITEM_PAPER;
     if (strcmp(name, "minecraft:piglin_banner_pattern") == 0) return ITEM_PIGLIN_BANNER_PATTERN;
     if (strcmp(name, "minecraft:poisonous_potato") == 0) return ITEM_POISONOUS_POTATO;
@@ -211,6 +213,7 @@ const char* global_id2item_name(int global_id, int mc) {
     case ITEM_APPLE: return "minecraft:apple";
     case ITEM_ARROW: return "minecraft:arrow";
     case ITEM_BAMBOO: return "minecraft:bamboo";
+    case ITEM_BAKED_POTATO: return "minecraft:baked_potato";
     case ITEM_BARREL: return "minecraft:barrel";
     case ITEM_BEEF: return "minecraft:beef";
     case ITEM_BEETROOT_SEEDS: return "minecraft:beetroot_seeds";
@@ -341,6 +344,7 @@ const char* global_id2item_name(int global_id, int mc) {
     case ITEM_NETHER_WART: return "minecraft:nether_wart";
     case ITEM_OAK_SAPLING: return "minecraft:oak_sapling";
     case ITEM_OBSIDIAN: return "minecraft:obsidian";
+    case ITEM_PACKED_ICE: return "minecraft:packed_ice";
     case ITEM_PAPER: return "minecraft:paper";
     case ITEM_PIGLIN_BANNER_PATTERN: return "minecraft:piglin_banner_pattern";
     case ITEM_POISONOUS_POTATO: return "minecraft:poisonous_potato";
