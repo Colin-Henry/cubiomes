@@ -34,3 +34,6 @@ build
 cubiomes.dll
 silence_find.exe
 ancient_city_silence_find.c
+
+minecraft-*-jar-data/*
+minecraft-*-java-code/*
