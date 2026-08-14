@@ -32,3 +32,5 @@ build
 .idea
 /CMakeFiles
 cubiomes.dll
+silence_find.exe
+ancient_city_silence_find.c
