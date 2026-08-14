@@ -30,3 +30,5 @@ Makefile2
 build
 
 .idea
+/CMakeFiles
+cubiomes.dll
