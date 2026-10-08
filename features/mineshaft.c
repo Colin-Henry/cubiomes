@@ -1048,6 +1048,7 @@ int getMineshaftLoot(Generator *g, SurfaceNoise *sn, Piece *list, int n, Structu
         }
     }
     free(carverCache);
+    free(detailsCache);
     free(chunkXs);
     free(chunkZs);
     free(removed);
